@@ -15,6 +15,18 @@ from .lambda_loss import (
     lambda_loss,
 )
 from .listwise import list_mle, listwise_softmax_ce, p_list_mle
+from .modules import (
+    LambdaLoss,
+    LambdaLossMAP,
+    LambdaLossMRR,
+    LambdaLossNDCG,
+    ListMLELoss,
+    ListNetLoss,
+    ListwiseLoss,
+    PointwiseCELoss,
+    PositionAwareListMLELoss,
+    RankNetLoss,
+)
 from .pairwise import pairwise_posrank_loss, ranknet_loss
 from .pointwise import pointwise_ce_from_yes_no_logits, yes_no_to_score
 
@@ -30,12 +42,22 @@ __all__ = [
     "WEIGHTING_SCHEMES",
     "get_weighting_scheme",
     "lambda_loss",
+    "LambdaLoss",
+    "LambdaLossNDCG",
+    "LambdaLossMAP",
+    "LambdaLossMRR",
     "listwise_softmax_ce",
+    "ListwiseLoss",
+    "ListNetLoss",
     "list_mle",
+    "ListMLELoss",
     "p_list_mle",
+    "PositionAwareListMLELoss",
     "pairwise_posrank_loss",
     "ranknet_loss",
+    "RankNetLoss",
     "yes_no_to_score",
     "pointwise_ce_from_yes_no_logits",
+    "PointwiseCELoss",
     "infonce_loss",
 ]

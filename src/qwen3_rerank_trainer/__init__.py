@@ -16,7 +16,7 @@ Usage:
     from qwen3_rerank_trainer.training import ContrastiveSFTTrainer
 """
 
-__version__ = "0.1.4"
+__version__ = "0.2.0"
 
 # ============================================================================
 # 损失函数
@@ -24,20 +24,30 @@ __version__ = "0.1.4"
 from .losses import (
     # LambdaLoss 框架
     lambda_loss,
+    LambdaLoss,
+    LambdaLossNDCG,
+    LambdaLossMAP,
+    LambdaLossMRR,
     # 权重方案
     NDCGLoss2PPScheme,
     MAPScheme,
     MRRScheme,
     # Listwise
     list_mle,
+    ListMLELoss,
     p_list_mle,
+    PositionAwareListMLELoss,
     listwise_softmax_ce,
+    ListwiseLoss,
+    ListNetLoss,
     # Pairwise
     ranknet_loss,
+    RankNetLoss,
     pairwise_posrank_loss,
     # Pointwise
     yes_no_to_score,
     pointwise_ce_from_yes_no_logits,
+    PointwiseCELoss,
     # Contrastive
     infonce_loss,
 )
@@ -48,8 +58,17 @@ from .losses import (
 from .rl import (
     reinforce_loss,
     dpo_loss,
+    REINFORCELoss,
+    GRPOLoss,
+    DAPOLoss,
+    DRGRPOLoss,
+    DPOLoss,
     compute_doc_level_rewards,
     compute_doc_level_advantages,
+    rank_based_reward,
+    score_based_reward,
+    ndcg_based_reward,
+    recall_based_reward,
 )
 
 # ============================================================================
@@ -141,22 +160,41 @@ __all__ = [
     "__version__",
     # 损失函数
     "lambda_loss",
+    "LambdaLoss",
+    "LambdaLossNDCG",
+    "LambdaLossMAP",
+    "LambdaLossMRR",
     "NDCGLoss2PPScheme",
     "MAPScheme",
     "MRRScheme",
     "list_mle",
+    "ListMLELoss",
     "p_list_mle",
+    "PositionAwareListMLELoss",
     "listwise_softmax_ce",
+    "ListwiseLoss",
+    "ListNetLoss",
     "ranknet_loss",
+    "RankNetLoss",
     "pairwise_posrank_loss",
     "yes_no_to_score",
     "pointwise_ce_from_yes_no_logits",
+    "PointwiseCELoss",
     "infonce_loss",
     # RL
     "reinforce_loss",
     "dpo_loss",
+    "REINFORCELoss",
+    "GRPOLoss",
+    "DAPOLoss",
+    "DRGRPOLoss",
+    "DPOLoss",
     "compute_doc_level_rewards",
     "compute_doc_level_advantages",
+    "rank_based_reward",
+    "score_based_reward",
+    "ndcg_based_reward",
+    "recall_based_reward",
     # 评估
     "mrr",
     "ap",

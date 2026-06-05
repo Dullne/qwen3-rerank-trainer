@@ -1,34 +1,34 @@
 # Release Workflow
 
-This package is released from this directory: `/data/train_res/code/rerank/qwen3-rerank-trainer`.
+`/data/train_res/code/rerank/qwen3-rerank-trainer` is the single source of truth for the
+`qwen3-rerank-trainer` package.
 
-## Source of Truth
+All new loss functions, RL logic, training changes, evaluation changes, and packaging updates
+should be developed and released directly from this repository.
 
-- TrainFactory development source:
-  - `/data/train_res/code/TrainFactory/train_factory/qwen3_rerank_core/losses`
-  - `/data/train_res/code/TrainFactory/train_factory/qwen3_rerank_core/rl`
-- Publish source:
-  - `src/qwen3_rerank_trainer/losses`
-  - `src/qwen3_rerank_trainer/rl`
+## Development Rule
 
-Always sync from TrainFactory before cutting a release.
+- Do not sync code from `TrainFactory`.
+- Do not maintain a second copy of `qwen3_rerank_trainer` elsewhere.
+- If `TrainFactory` needs new functionality, update this repository first and consume it as a
+  dependency.
 
-## Sync
+## Pre-release Checklist
 
-```bash
-python scripts/sync_from_trainfactory.py
-```
+Before cutting a release:
 
-Dry-run:
-
-```bash
-python scripts/sync_from_trainfactory.py --check
-```
+1. Update package code in `src/qwen3_rerank_trainer/`.
+2. Run tests locally.
+3. Update the version in `pyproject.toml`.
+4. Update `CHANGELOG.md`.
+5. Rebuild the package artifacts.
 
 ## Test
 
+Run the full test suite:
+
 ```bash
-python -m pytest -q tests/test_losses.py tests/test_dataset_collator.py tests/test_metrics.py
+python -m pytest -q
 ```
 
 ## Version Bump
@@ -36,20 +36,28 @@ python -m pytest -q tests/test_losses.py tests/test_dataset_collator.py tests/te
 Update:
 
 - `pyproject.toml` -> `[project].version`
+- `src/qwen3_rerank_trainer/__init__.py` -> `__version__`
 - `CHANGELOG.md`
 
-Recommended policy:
+Suggested versioning policy:
 
-- Patch: bug fix or internal cleanup
-- Minor: new loss / reward / training behavior
-- Major: breaking API or CLI changes
+- Patch: bug fix, packaging fix, docs fix, small internal cleanup
+- Minor: new loss, reward, CLI option, trainer behavior, or new public API
+- Major: breaking API, CLI, data format, or training behavior change
 
 ## Build
+
+Clean old artifacts and rebuild:
 
 ```bash
 rm -rf build dist src/qwen3_rerank_trainer.egg-info
 python -m build
 ```
+
+Expected artifacts:
+
+- `dist/qwen3_rerank_trainer-X.Y.Z.tar.gz`
+- `dist/qwen3_rerank_trainer-X.Y.Z-py3-none-any.whl`
 
 ## Git Release
 
@@ -58,16 +66,26 @@ git status
 git add .
 git commit -m "Release qwen3-rerank-trainer X.Y.Z"
 git tag vX.Y.Z
-git push origin master
-git push origin vX.Y.Z
+git push origin master --tags
 ```
+
+If your default branch changes in the future, replace `master` with the actual default branch.
 
 ## Publish Package
 
-If PyPI publishing is configured:
+If publishing to PyPI:
 
 ```bash
 python -m twine upload dist/*
 ```
 
-If using another registry, replace the upload command accordingly.
+If publishing to another registry, replace the upload target accordingly.
+
+## Post-release Check
+
+After release:
+
+1. Confirm the Git tag exists on GitHub.
+2. Confirm the uploaded package version matches the Git tag.
+3. In downstream repositories such as `TrainFactory`, upgrade to the released package version
+   instead of copying source code.
