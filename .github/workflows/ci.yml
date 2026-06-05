@@ -28,7 +28,7 @@ jobs:
         run: python -m pip install --upgrade pip
 
       - name: Install package and dev dependencies
-        run: pip install -e ".[dev]" build
+        run: pip install -e ".[dev,full]" build
 
       - name: Run test suite
         run: python -m pytest -q
