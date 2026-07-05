@@ -16,7 +16,7 @@ Usage:
     from qwen3_rerank_trainer.training import ContrastiveSFTTrainer
 """
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 # ============================================================================
 # 损失函数
