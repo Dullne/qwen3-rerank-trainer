@@ -402,7 +402,7 @@ qwen3_rerank_trainer/
 
 ## License
 
-MIT
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Star History
 

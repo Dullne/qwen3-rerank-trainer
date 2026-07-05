@@ -402,7 +402,7 @@ qwen3_rerank_trainer/
 
 ## 许可证
 
-MIT
+本项目基于 MIT 许可证开源，详见 [LICENSE](LICENSE)。
 
 ## Star History
 
