@@ -1,5 +1,8 @@
 """Tests for evaluation metrics."""
 
+import json
+
+import numpy as np
 import pytest
 
 
@@ -109,12 +112,19 @@ class TestScoreBasedMetrics:
 
     def test_ndcg_from_scores(self):
         """Test NDCG from scores."""
-        from qwen3_rerank_trainer.evaluation import ndcg_from_scores
+        from qwen3_rerank_trainer.evaluation import ndcg_at_k, ndcg_from_scores
 
         # Perfect ranking
         scores = [0.9, 0.8, 0.1, 0.05]
         labels = [1, 1, 0, 0]
         assert ndcg_from_scores(scores, labels, k=2) == 1.0
+
+        # Graded labels: ranking the weaker positive first should be penalized.
+        scores = [0.1, 0.9]
+        labels = [2, 1]
+        expected = ndcg_at_k([1, 0], {0: 2.0, 1: 1.0}, k=2)
+        assert ndcg_from_scores(scores, labels, k=2) == expected
+        assert ndcg_from_scores(scores, labels, k=2) < 1.0
 
 
 class TestComputeAllMetrics:
@@ -148,3 +158,164 @@ class TestComputeAllMetrics:
         agg = aggregate_metrics(results)
         assert agg['MRR'] == 0.75
         assert agg['AP'] == 0.7
+
+    def test_mteb_aggregate_uses_graded_ndcg(self):
+        """MTEB v2 qrels should keep graded relevance for NDCG."""
+        from qwen3_rerank_trainer.evaluation import MTEBRerankEvaluator
+
+        evaluator = MTEBRerankEvaluator(rerank_fn=lambda query, docs: ([1, 0], {}))
+        metrics = evaluator._aggregate_results(
+            [
+                {
+                    "ranking": [1, 0],
+                    "positive_indices": {0, 1},
+                    "relevance_scores": {0: 2.0, 1: 1.0},
+                }
+            ],
+            ks=[2],
+        )
+
+        assert metrics["NDCG@2"] < 1.0
+
+    def test_mteb_normalizes_ranked_documents_and_pairs(self):
+        """Evaluator should accept local reranker outputs, not only API tuples."""
+        from qwen3_rerank_trainer.evaluation import MTEBRerankEvaluator
+
+        docs = ["alpha", "beta", "gamma"]
+
+        evaluator = MTEBRerankEvaluator(rerank_fn=lambda query, documents: ["gamma", "alpha"])
+        ranking, scores = evaluator._call_rerank("q", docs)
+        assert ranking == [2, 0, 1]
+        assert scores[2] > scores[0] > scores[1]
+
+        evaluator = MTEBRerankEvaluator(
+            rerank_fn=lambda query, documents: [("beta", 0.8), ("alpha", 0.2)]
+        )
+        ranking, scores = evaluator._call_rerank("q", docs)
+        assert ranking == [1, 0, 2]
+        assert scores[1] == 0.8
+
+    def test_mteb_normalizes_partial_index_ranking(self):
+        """Partial index rankings should append unreturned documents."""
+        from qwen3_rerank_trainer.evaluation import MTEBRerankEvaluator
+
+        evaluator = MTEBRerankEvaluator(rerank_fn=lambda query, documents: [1])
+        ranking, scores = evaluator._call_rerank("q", ["alpha", "beta", "gamma"])
+
+        assert ranking == [1, 0, 2]
+        assert set(scores) == {0, 1, 2}
+
+    def test_mteb_v2_fallback_without_top_ranked_includes_negatives(self):
+        """When top_ranked is absent, candidates should include corpus negatives."""
+        from qwen3_rerank_trainer.evaluation import MTEBRerankEvaluator
+
+        seen_docs = []
+
+        def fake_rerank(query, documents):
+            seen_docs.extend(documents)
+            return list(range(len(documents)))
+
+        evaluator = MTEBRerankEvaluator(rerank_fn=fake_rerank)
+        metrics = evaluator._evaluate_ranking_dataset(
+            queries={"q1": {"text": "query"}},
+            corpus={
+                "p1": {"text": "positive"},
+                "n1": {"text": "negative one"},
+                "n2": {"text": "negative two"},
+            },
+            qrels={"q1": {"p1": 1}},
+            top_ranked={},
+            max_samples=None,
+            shuffle_seed=42,
+            ks=[1],
+            progress_callback=None,
+            show_progress=False,
+        )
+
+        assert metrics["num_evaluated"] == 1
+        assert "positive" in seen_docs
+        assert any(doc.startswith("negative") for doc in seen_docs)
+
+    def test_report_json_handles_numpy_values_and_zero_score_models(self, tmp_path):
+        """Reports should serialize array scalars and keep zero-valued models ranked."""
+        from qwen3_rerank_trainer.evaluation.report import (
+            ReportConfig,
+            generate_report,
+            save_results_json,
+        )
+
+        json_path = save_results_json(
+            {
+                "Task": {
+                    "NDCG@10": np.float32(0.0),
+                    "curve": np.array([0.0, 1.0]),
+                    "labels": {"b", "a"},
+                }
+            },
+            tmp_path / "raw" / "results.json",
+        )
+        with json_path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        assert payload["results"]["Task"]["NDCG@10"] == 0.0
+        assert payload["results"]["Task"]["curve"] == [0.0, 1.0]
+        assert payload["results"]["Task"]["labels"] == ["a", "b"]
+
+        paths = generate_report(
+            [
+                {
+                    "model": "zero-model",
+                    "results": {"Task": {"NDCG@10": 0.0, "num_evaluated": 1}},
+                }
+            ],
+            tmp_path / "report",
+            ReportConfig(metrics=["NDCG@10"], primary_metric="NDCG@10"),
+        )
+        markdown = paths["markdown"].read_text(encoding="utf-8")
+        assert "zero-model" in markdown
+        assert "| 1 | zero-model | 0.00% | - |" in markdown
+
+    def test_api_and_gpu_worker_validations(self, monkeypatch):
+        """Invalid concurrency values should fail before launching work."""
+        from qwen3_rerank_trainer.evaluation import api_client
+        from qwen3_rerank_trainer.evaluation.gpu_utils import run_with_gpu_balance
+
+        with pytest.raises(ValueError, match="max_concurrency"):
+            api_client.call_rerank_batch(
+                [],
+                endpoint="http://127.0.0.1:9/rerank",
+                max_concurrency=0,
+                show_progress=False,
+            )
+
+        monkeypatch.setattr(api_client, "AIOHTTP_AVAILABLE", True)
+        with pytest.raises(ValueError, match="max_concurrency"):
+            api_client.call_rerank_batch(
+                [("q", ["doc"])],
+                endpoint="http://127.0.0.1:9/rerank",
+                max_concurrency=0,
+                show_progress=False,
+            )
+
+        with pytest.raises(ValueError, match="total_workers"):
+            run_with_gpu_balance(
+                models=["m1"],
+                gpu_info={"m1": 0},
+                total_workers=0,
+                eval_func=lambda model: {},
+                verbose=False,
+            )
+
+    def test_two_stage_prepare_rerank_model_from_config(self):
+        """Two-stage evaluator should use the in-module API rerank model."""
+        from qwen3_rerank_trainer.evaluation.two_stage_eval import APIRerankModel, TwoStageEvaluator
+
+        evaluator = TwoStageEvaluator(
+            rerank_config={
+                "api_base": "http://localhost:9997/v1",
+                "model_name": "Qwen3-Reranker",
+            }
+        )
+
+        model = evaluator._prepare_rerank_model()
+        assert isinstance(model, APIRerankModel)
+        assert model.endpoint == "http://localhost:9997/v1/rerank"

@@ -13,6 +13,27 @@ import torch.nn.functional as F
 from .rewards import compute_doc_level_advantages, compute_doc_level_rewards
 
 
+def _validate_1d_tensor(name: str, value: torch.Tensor) -> torch.Tensor:
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"{name} must be a torch.Tensor")
+    if value.ndim != 1:
+        raise ValueError(f"{name} must be 1D, got {value.ndim}D")
+    if value.numel() == 0:
+        raise ValueError(f"{name} must not be empty")
+    return value
+
+
+def _validate_same_shape(reference: torch.Tensor, **tensors: Optional[torch.Tensor]) -> None:
+    for name, value in tensors.items():
+        if value is None:
+            continue
+        _validate_1d_tensor(name, value)
+        if value.shape != reference.shape:
+            raise ValueError(
+                f"{name} shape {tuple(value.shape)} != expected shape {tuple(reference.shape)}"
+            )
+
+
 def reinforce_loss(
     yes_logits: torch.Tensor,
     no_logits: torch.Tensor,
@@ -61,11 +82,20 @@ def reinforce_loss(
         rewards: [N] 每个 doc 的 reward
         kl: KL 散度
     """
+    _validate_1d_tensor("yes_logits", yes_logits)
+    _validate_same_shape(
+        yes_logits,
+        no_logits=no_logits,
+        labels=labels,
+        ref_yes_logits=ref_yes_logits,
+        ref_no_logits=ref_no_logits,
+    )
+    labels = labels.to(device=yes_logits.device)
     scores = torch.sigmoid(yes_logits - no_logits)
 
     advantages = compute_doc_level_advantages(
         scores, labels, reward_type=reward_type, scale_rewards=scale_rewards, k=reward_k
-    )
+    ).detach()
 
     logit_diff = yes_logits - no_logits
     log_probs = torch.where(
@@ -105,7 +135,7 @@ def reinforce_loss(
     else:
         raise ValueError(f"Unknown loss_type: {loss_type}. Choose from 'grpo', 'dapo', 'dr_grpo'")
 
-    kl = torch.tensor(0.0, device=yes_logits.device)
+    kl = yes_logits.sum() * 0.0
     if kl_coef > 0 and ref_yes_logits is not None and ref_no_logits is not None:
         logit_diff = yes_logits - no_logits
         ref_logit_diff = ref_yes_logits - ref_no_logits
@@ -127,7 +157,7 @@ def reinforce_loss(
 
     loss = pg_loss + kl_coef * kl
 
-    rewards = compute_doc_level_rewards(scores, labels, reward_type, k=reward_k)
+    rewards = compute_doc_level_rewards(scores, labels, reward_type, k=reward_k).detach()
 
     return loss, advantages, rewards, kl
 
@@ -166,6 +196,21 @@ def dpo_loss(
         pos_score: 正例平均 P(yes)
         neg_score: 负例平均 P(yes)
     """
+    _validate_1d_tensor("pos_yes_logits", pos_yes_logits)
+    _validate_1d_tensor("neg_yes_logits", neg_yes_logits)
+    _validate_same_shape(
+        pos_yes_logits,
+        pos_no_logits=pos_no_logits,
+        ref_pos_yes_logits=ref_pos_yes_logits,
+        ref_pos_no_logits=ref_pos_no_logits,
+    )
+    _validate_same_shape(
+        neg_yes_logits,
+        neg_no_logits=neg_no_logits,
+        ref_neg_yes_logits=ref_neg_yes_logits,
+        ref_neg_no_logits=ref_neg_no_logits,
+    )
+
     pos_log_probs = F.logsigmoid(pos_yes_logits - pos_no_logits)
     pos_avg_log_prob = pos_log_probs.mean()
 
@@ -175,9 +220,14 @@ def dpo_loss(
     log_ratio_policy = pos_avg_log_prob - neg_avg_log_prob
 
     if reference_free:
-        log_ratio_ref = 0.0
+        log_ratio_ref = log_ratio_policy.new_tensor(0.0)
     else:
-        if ref_pos_yes_logits is None or ref_neg_yes_logits is None:
+        if (
+            ref_pos_yes_logits is None
+            or ref_pos_no_logits is None
+            or ref_neg_yes_logits is None
+            or ref_neg_no_logits is None
+        ):
             raise ValueError(
                 "reference_free=False 但未提供参考模型 logits。"
                 "请提供 ref_pos_yes_logits, ref_pos_no_logits, ref_neg_yes_logits, ref_neg_no_logits"

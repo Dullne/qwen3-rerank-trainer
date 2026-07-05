@@ -32,8 +32,8 @@ class ContrastiveSFTTrainer(Trainer):
             - "ranknet": RankNet 成对排序损失
         temperature: InfoNCE 温度参数 (仅 infonce 使用)
         infonce_mode: InfoNCE 正例策略 (仅 infonce 使用)
-            - "single": 单正例（默认）
-            - "posset": 多正例正例集
+            - "single": 单正例
+            - "posset": 多正例正例集（默认；单正例时与 single 等价）
             - "avgpos": 多正例逐正例对比
         lambda_metric: LambdaLoss 目标指标 (仅 lambda_loss 使用)
             - "ndcg" (默认)
@@ -63,7 +63,7 @@ class ContrastiveSFTTrainer(Trainer):
         chunk_size: int = 0,
         loss_type: str = "bce",
         temperature: float = 0.05,
-        infonce_mode: str = "single",
+        infonce_mode: str = "posset",
         lambda_metric: str = "ndcg",
         ranknet_max_pairs_per_batch: int = 2000000,
         *args, **kwargs

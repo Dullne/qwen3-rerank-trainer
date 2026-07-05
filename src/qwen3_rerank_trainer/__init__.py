@@ -16,7 +16,7 @@ Usage:
     from qwen3_rerank_trainer.training import ContrastiveSFTTrainer
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # ============================================================================
 # 损失函数
@@ -117,7 +117,7 @@ from .data import (
 # ============================================================================
 try:
     from .inference import Qwen3Reranker
-except ImportError:
+except Exception:
     Qwen3Reranker = None
 
 # ============================================================================
@@ -130,7 +130,7 @@ try:
         RerankCollator,
         ContrastiveSFTTrainer,
     )
-except ImportError:
+except Exception:
     RerankDataset = None
     StreamingRerankDataset = None
     RerankCollator = None
@@ -147,7 +147,7 @@ try:
         RLTrainer,
         load_sft_model,
     )
-except ImportError:
+except Exception:
     RLRerankDataset = None
     StreamingRLRerankDataset = None
     RLCollator = None

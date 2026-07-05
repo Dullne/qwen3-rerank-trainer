@@ -164,9 +164,9 @@ def parse_args():
     parser.add_argument(
         '--infonce-mode',
         type=str,
-        default='single',
+        default='posset',
         choices=['single', 'posset', 'avgpos'],
-        help='InfoNCE 正例策略 (默认: single)'
+        help='InfoNCE 正例策略 (默认: posset，单正例时与 single 等价)'
     )
     parser.add_argument(
         '--lambda-metric',
@@ -251,15 +251,23 @@ def main():
     """主函数"""
     args = parse_args()
 
+    # 检查数据文件
+    if not os.path.exists(args.data):
+        logger.error(f"数据文件不存在: {args.data}")
+        return 1
+
     # 检查依赖
     try:
         from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
-    except ImportError:
-        logger.error("请安装 transformers: pip install transformers>=4.40.0")
+        from .dataset import RerankDataset
+        from .collator import RerankCollator
+        from .sft_trainer import ContrastiveSFTTrainer, get_yes_no_token_ids
+    except Exception as exc:
+        logger.error(
+            "SFT 训练依赖不可用，请运行: pip install -e '.[full]'；"
+            f"原始错误: {exc}"
+        )
         return 1
-
-    from ..training import RerankDataset, RerankCollator, ContrastiveSFTTrainer
-    from ..training.sft_trainer import get_yes_no_token_ids
 
     # 设置随机种子
     import random
@@ -269,11 +277,6 @@ def main():
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
-
-    # 检查数据文件
-    if not os.path.exists(args.data):
-        logger.error(f"数据文件不存在: {args.data}")
-        return 1
 
     # 创建输出目录
     output_dir = Path(args.output)

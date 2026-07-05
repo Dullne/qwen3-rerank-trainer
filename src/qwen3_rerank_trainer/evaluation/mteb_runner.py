@@ -47,7 +47,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 
 from .metrics import (
-    mrr, ap, ndcg_at_k_binary,
+    mrr, ap, ndcg_at_k, ndcg_at_k_binary,
     precision_at_k, recall_at_k,
     compute_all_metrics, aggregate_metrics,
 )
@@ -308,11 +308,107 @@ class MTEBRerankEvaluator:
     ) -> Tuple[List[int], Dict[int, float]]:
         """调用 rerank"""
         if self.rerank_fn is not None:
-            return self.rerank_fn(query, documents)
+            result = self.rerank_fn(query, documents)
         elif self.reranker is not None:
-            return self.reranker.rerank(query, documents)
+            result = self.reranker.rerank(query, documents)
         else:
             raise ValueError("No rerank function available")
+        return self._normalize_rerank_output(result, documents)
+
+    def _normalize_rerank_output(
+        self,
+        result: Any,
+        documents: List[str],
+    ) -> Tuple[List[int], Dict[int, float]]:
+        """Normalize supported reranker return formats into (ranking, scores)."""
+        num_docs = len(documents)
+        doc_to_indices: Dict[str, List[int]] = {}
+        for idx, doc in enumerate(documents):
+            doc_to_indices.setdefault(doc, []).append(idx)
+
+        def pop_doc_index(doc: str) -> Optional[int]:
+            indices = doc_to_indices.get(doc)
+            if indices:
+                return indices.pop(0)
+            return None
+
+        if (
+            isinstance(result, tuple)
+            and len(result) == 2
+            and isinstance(result[0], list)
+            and isinstance(result[1], dict)
+            and all(isinstance(i, int) for i in result[0])
+        ):
+            ranking, scores = result
+            if any(i < 0 or i >= num_docs for i in ranking):
+                raise ValueError("Rerank ranking contains out-of-range document index")
+            normalized_scores = {int(i): float(v) for i, v in scores.items() if 0 <= int(i) < num_docs}
+            for idx in range(num_docs):
+                normalized_scores.setdefault(idx, 0.0)
+            full_ranking = [idx for idx in ranking if idx in normalized_scores]
+            full_ranking.extend(idx for idx in range(num_docs) if idx not in full_ranking)
+            return full_ranking, normalized_scores
+
+        if isinstance(result, list):
+            if all(isinstance(item, dict) for item in result):
+                scores: Dict[int, float] = {}
+                ranking: List[int] = []
+                for rank, item in enumerate(result):
+                    idx = item.get("index", item.get("corpus_id"))
+                    if idx is None and "document" in item:
+                        idx = pop_doc_index(str(item["document"]))
+                    if idx is None:
+                        continue
+                    idx = int(idx)
+                    if 0 <= idx < num_docs:
+                        score = item.get("relevance_score", item.get("score", float(num_docs - rank)))
+                        scores[idx] = float(score)
+                        ranking.append(idx)
+                ranking.extend(idx for idx in range(num_docs) if idx not in ranking)
+                for idx in range(num_docs):
+                    scores.setdefault(idx, 0.0)
+                return ranking, scores
+
+            if all(isinstance(item, tuple) and len(item) == 2 for item in result):
+                scores = {}
+                ranking = []
+                for rank, (doc, score) in enumerate(result):
+                    idx = int(doc) if isinstance(doc, int) else pop_doc_index(str(doc))
+                    if idx is not None and 0 <= idx < num_docs:
+                        ranking.append(idx)
+                        scores[idx] = float(score)
+                ranking.extend(idx for idx in range(num_docs) if idx not in ranking)
+                for idx in range(num_docs):
+                    scores.setdefault(idx, 0.0)
+                return ranking, scores
+
+            if all(isinstance(item, int) for item in result):
+                if any(item < 0 or item >= num_docs for item in result):
+                    raise ValueError("Rerank ranking contains out-of-range document index")
+                scores = {idx: float(num_docs - rank) for rank, idx in enumerate(result)}
+                for idx in range(num_docs):
+                    scores.setdefault(idx, 0.0)
+                full_ranking = list(result)
+                full_ranking.extend(idx for idx in range(num_docs) if idx not in full_ranking)
+                return full_ranking, scores
+
+            if all(isinstance(item, str) for item in result):
+                ranking = []
+                scores = {}
+                for rank, doc in enumerate(result):
+                    idx = pop_doc_index(doc)
+                    if idx is not None:
+                        ranking.append(idx)
+                        scores[idx] = float(num_docs - rank)
+                ranking.extend(idx for idx in range(num_docs) if idx not in ranking)
+                for idx in range(num_docs):
+                    scores.setdefault(idx, 0.0)
+                return ranking, scores
+
+        raise ValueError(
+            "Unsupported rerank return format. Expected (ranking, scores), ranked documents, "
+            "(document, score) pairs, or API/evalscope result dictionaries."
+        )
 
     def evaluate(
         self,
@@ -524,8 +620,8 @@ class MTEBRerankEvaluator:
 
             # 打乱文档顺序，消除 tie-breaking 偏见
             indices = list(range(len(docs)))
-            random.seed(shuffle_seed + i)
-            random.shuffle(indices)
+            rng = random.Random(shuffle_seed + i)
+            rng.shuffle(indices)
             shuffled_docs = [docs[idx] for idx in indices]
 
             # 记录正例在打乱后的新位置
@@ -613,8 +709,8 @@ class MTEBRerankEvaluator:
 
         # 打乱文档顺序（消除位置偏见）
         indices = list(range(len(docs)))
-        random.seed(shuffle_seed + sample_idx)
-        random.shuffle(indices)
+        rng = random.Random(shuffle_seed + sample_idx)
+        rng.shuffle(indices)
         shuffled_docs = [docs[idx] for idx in indices]
 
         # 记录正例在打乱后的位置
@@ -676,15 +772,25 @@ class MTEBRerankEvaluator:
                     corpus_dict[item['id']] = item
             corpus = corpus_dict
 
-        # 如果没有 top_ranked，从 qrels 构建
+        # 如果没有 top_ranked，从 qrels + corpus 构建候选集，避免只评估相关文档。
         if not top_ranked:
-            top_ranked = {qid: list(rels.keys()) for qid, rels in qrels.items()}
+            corpus_ids = list(corpus.keys()) if isinstance(corpus, dict) else list(range(len(corpus)))
+            top_ranked = {}
+            for qid, rels in qrels.items():
+                rel_ids = list(rels.keys())
+                negatives = [doc_id for doc_id in corpus_ids if doc_id not in rels]
+                qid_seed = sum(ord(ch) for ch in str(qid))
+                rng = random.Random(shuffle_seed + qid_seed)
+                rng.shuffle(negatives)
+                candidates = (rel_ids + negatives)[:100]
+                rng.shuffle(candidates)
+                top_ranked[qid] = candidates
 
         # 限制样本数
         query_ids = list(queries.keys()) if isinstance(queries, dict) else list(range(len(queries)))
         if max_samples and max_samples < len(query_ids):
-            random.seed(shuffle_seed)
-            query_ids = random.sample(query_ids, max_samples)
+            rng = random.Random(shuffle_seed)
+            query_ids = rng.sample(query_ids, max_samples)
 
         num_queries = len(query_ids)
         logger.info(f"Evaluating {num_queries} queries (MTEB v2 format)")
@@ -742,10 +848,12 @@ class MTEBRerankEvaluator:
             try:
                 ranking, scores = self._call_rerank(query_text, documents)
                 positive_indices = {i for i, lab in enumerate(labels) if lab > 0}
+                relevance_scores = {i: float(lab) for i, lab in enumerate(labels) if lab > 0}
                 all_results.append({
                     "ranking": ranking,
                     "scores": scores,
                     "positive_indices": positive_indices,
+                    "relevance_scores": relevance_scores,
                     "num_docs": len(documents),
                 })
             except Exception as e:
@@ -787,12 +895,16 @@ class MTEBRerankEvaluator:
         for result in all_results:
             ranking = result["ranking"]
             positive_indices = result["positive_indices"]
+            relevance_scores = result.get("relevance_scores")
 
             mrr_scores.append(mrr(ranking, positive_indices))
             ap_scores.append(ap(ranking, positive_indices))
 
             for k in ks:
-                ndcg_scores[k].append(ndcg_at_k_binary(ranking, positive_indices, k))
+                if relevance_scores:
+                    ndcg_scores[k].append(ndcg_at_k(ranking, relevance_scores, k))
+                else:
+                    ndcg_scores[k].append(ndcg_at_k_binary(ranking, positive_indices, k))
                 precision_scores[k].append(precision_at_k(ranking, positive_indices, k))
                 recall_scores[k].append(recall_at_k(ranking, positive_indices, k))
 
@@ -877,8 +989,8 @@ class MTEBRerankEvaluator:
 
         # 打乱文档顺序
         indices = list(range(len(docs)))
-        random.seed(shuffle_seed + sample_idx)
-        random.shuffle(indices)
+        rng = random.Random(shuffle_seed + sample_idx)
+        rng.shuffle(indices)
         shuffled_docs = [docs[idx] for idx in indices]
 
         positive_indices = set(indices.index(j) for j in range(num_positive))

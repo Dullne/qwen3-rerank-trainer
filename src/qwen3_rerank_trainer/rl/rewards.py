@@ -10,6 +10,28 @@ from typing import List, Union
 import torch
 
 
+def _normalize_scores_labels(
+    scores: Union[torch.Tensor, List[float]],
+    labels: Union[torch.Tensor, List[int]],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if not isinstance(scores, torch.Tensor):
+        scores = torch.tensor(scores, dtype=torch.float32)
+    if not isinstance(labels, torch.Tensor):
+        labels = torch.tensor(labels, dtype=torch.long, device=scores.device)
+    else:
+        labels = labels.to(device=scores.device)
+
+    if scores.ndim != 1 or labels.ndim != 1:
+        raise ValueError(
+            f"scores/labels must be 1D, got scores={scores.ndim}D labels={labels.ndim}D"
+        )
+    if scores.shape != labels.shape:
+        raise ValueError(f"scores shape {tuple(scores.shape)} != labels shape {tuple(labels.shape)}")
+    if scores.numel() == 0:
+        raise ValueError("scores/labels must not be empty")
+    return scores, labels
+
+
 def compute_ndcg_based_rewards(
     scores: Union[torch.Tensor, List[float]],
     labels: Union[torch.Tensor, List[int]],
@@ -34,10 +56,7 @@ def compute_ndcg_based_rewards(
         - 负例在 top-k 内：reward = -1 / log2(rank + 1)（惩罚占位）
         - 负例在 top-k 外：reward = 0
     """
-    if not isinstance(scores, torch.Tensor):
-        scores = torch.tensor(scores, dtype=torch.float32)
-    if not isinstance(labels, torch.Tensor):
-        labels = torch.tensor(labels, dtype=torch.long)
+    scores, labels = _normalize_scores_labels(scores, labels)
 
     N = len(scores)
     device = scores.device
@@ -86,10 +105,7 @@ def compute_recall_based_rewards(
         - 负例在 top-k 内：reward = -1.0（占位，惩罚）
         - 负例在 top-k 外：reward = 0.0（正确排除）
     """
-    if not isinstance(scores, torch.Tensor):
-        scores = torch.tensor(scores, dtype=torch.float32)
-    if not isinstance(labels, torch.Tensor):
-        labels = torch.tensor(labels, dtype=torch.long)
+    scores, labels = _normalize_scores_labels(scores, labels)
 
     N = len(scores)
     device = scores.device
@@ -139,10 +155,7 @@ def compute_doc_level_rewards(
         - 负例越界（排在某正例前）：reward = -1/min_pos_rank（惩罚）
         - 负例正确排序：reward = 0
     """
-    if not isinstance(scores, torch.Tensor):
-        scores = torch.tensor(scores, dtype=torch.float32)
-    if not isinstance(labels, torch.Tensor):
-        labels = torch.tensor(labels, dtype=torch.long)
+    scores, labels = _normalize_scores_labels(scores, labels)
 
     N = len(scores)
     device = scores.device

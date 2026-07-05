@@ -234,7 +234,6 @@ class TwoStageEvaluator:
 
         if self.rerank_config is not None:
             # 使用 API 配置创建模型
-            from .api_rerank_model import APIRerankModel
             return APIRerankModel(**self.rerank_config)
 
         logger.error("No rerank model or config provided")

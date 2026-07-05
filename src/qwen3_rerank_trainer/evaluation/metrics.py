@@ -226,19 +226,19 @@ def aggregate_metrics(
 
 def calculate_mrr(ranking: List[int], labels: List[int]) -> float:
     """兼容旧接口的 MRR 计算"""
-    positive_indices = {i for i, label in enumerate(labels) if label == 1}
+    positive_indices = {i for i, label in enumerate(labels) if label > 0}
     return mrr(ranking, positive_indices)
 
 
 def calculate_ndcg(ranking: List[int], labels: List[int], k: int = 10) -> float:
     """兼容旧接口的 NDCG@k 计算"""
-    positive_indices = {i for i, label in enumerate(labels) if label == 1}
-    return ndcg_at_k_binary(ranking, positive_indices, k)
+    relevance_scores = {i: float(label) for i, label in enumerate(labels) if label > 0}
+    return ndcg_at_k(ranking, relevance_scores, k)
 
 
 def calculate_ap(ranking: List[int], labels: List[int]) -> float:
     """兼容旧接口的 AP 计算"""
-    positive_indices = {i for i, label in enumerate(labels) if label == 1}
+    positive_indices = {i for i, label in enumerate(labels) if label > 0}
     return ap(ranking, positive_indices)
 
 
@@ -272,8 +272,8 @@ def ndcg_from_scores(scores: List[float], labels: List[int], k: int = 10) -> flo
         return 0.0
 
     sorted_indices = list(np.argsort(scores)[::-1])
-    positive_indices = {i for i, label in enumerate(labels) if label > 0}
-    return ndcg_at_k_binary(sorted_indices, positive_indices, min(k, len(scores)))
+    relevance_scores = {i: float(label) for i, label in enumerate(labels) if label > 0}
+    return ndcg_at_k(sorted_indices, relevance_scores, min(k, len(scores)))
 
 
 def precision_from_scores(scores: List[float], labels: List[int], k: int) -> float:
@@ -316,7 +316,7 @@ def mrr_from_sorted_labels(labels: List[int]) -> float:
         return 0.0
 
     for i, y in enumerate(labels):
-        if int(y) == 1:
+        if y > 0:
             return 1.0 / (i + 1)
     return 0.0
 
@@ -326,12 +326,12 @@ def ap_from_sorted_labels(labels: List[int]) -> float:
     if not labels or sum(labels) == 0:
         return 0.0
 
-    num_positive = sum(1 for y in labels if int(y) == 1)
+    num_positive = sum(1 for y in labels if y > 0)
     num_hits = 0
     precision_sum = 0.0
 
     for i, y in enumerate(labels, 1):
-        if int(y) == 1:
+        if y > 0:
             num_hits += 1
             precision_sum += num_hits / i
 
@@ -345,13 +345,13 @@ def ndcg_from_sorted_labels(labels: List[int], k: int = 10) -> float:
 
     dcg = 0.0
     for i, y in enumerate(labels[:k]):
-        if int(y) == 1:
-            dcg += 1.0 / math.log2(i + 2)
+        if y > 0:
+            dcg += (2 ** float(y) - 1) / math.log2(i + 2)
 
-    num_positives = sum(1 for y in labels if int(y) == 1)
+    sorted_rels = sorted((float(y) for y in labels if y > 0), reverse=True)[:k]
     idcg = 0.0
-    for i in range(min(k, num_positives)):
-        idcg += 1.0 / math.log2(i + 2)
+    for i, rel in enumerate(sorted_rels):
+        idcg += (2 ** rel - 1) / math.log2(i + 2)
 
     return dcg / idcg if idcg > 0 else 0.0
 
@@ -362,17 +362,17 @@ def precision_from_sorted_labels(labels: List[int], k: int) -> float:
         return 0.0
 
     top_k = labels[:k]
-    return sum(1 for y in top_k if int(y) == 1) / k
+    return sum(1 for y in top_k if y > 0) / k
 
 
 def recall_from_sorted_labels(labels: List[int], k: int) -> float:
     """基于已排序标签计算 Recall@k"""
-    total_positives = sum(1 for y in labels if int(y) == 1)
+    total_positives = sum(1 for y in labels if y > 0)
     if not labels or k <= 0 or total_positives == 0:
         return 0.0
 
     top_k = labels[:k]
-    return sum(1 for y in top_k if int(y) == 1) / total_positives
+    return sum(1 for y in top_k if y > 0) / total_positives
 
 
 def hit_from_sorted_labels(labels: List[int], k: int) -> float:
@@ -381,4 +381,4 @@ def hit_from_sorted_labels(labels: List[int], k: int) -> float:
         return 0.0
 
     top_k = labels[:k]
-    return 1.0 if any(int(y) == 1 for y in top_k) else 0.0
+    return 1.0 if any(y > 0 for y in top_k) else 0.0

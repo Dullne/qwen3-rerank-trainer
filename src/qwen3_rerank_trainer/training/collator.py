@@ -77,14 +77,21 @@ class RerankCollator:
 
             group_sizes.append(sample_size)
 
-        encoded = self.tokenizer(
-            all_texts,
-            max_length=self.max_length,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
-            pad_to_multiple_of=self.pad_to_multiple_of,
-        )
+        old_padding_side = getattr(self.tokenizer, "padding_side", None)
+        if old_padding_side is not None:
+            self.tokenizer.padding_side = "left"
+        try:
+            encoded = self.tokenizer(
+                all_texts,
+                max_length=self.max_length,
+                padding=True,
+                truncation=True,
+                return_tensors="pt",
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
+        finally:
+            if old_padding_side is not None:
+                self.tokenizer.padding_side = old_padding_side
 
         return {
             "input_ids": encoded["input_ids"],

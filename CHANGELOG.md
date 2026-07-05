@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-07-05
+
+### Fixed
+
+- **Training CLI**
+  - Made SFT/RL command-line entrypoints fail cleanly on missing inputs before importing
+    heavyweight optional trainer dependencies.
+  - Added RL precision flags and removed the hard-coded bf16 training setting.
+  - Added a `pyarrow<21` dependency guard for compatibility with supported `datasets`
+    releases.
+- **Data and Tokenization**
+  - Preserved caller tokenizer padding state and enforced left-padding where trainer logits
+    rely on the final token.
+  - Fixed old-format stringified list loading and streaming dataset worker sharding.
+  - Avoided global RNG mutation and improved negative-sampling backfill behavior.
+- **Losses and RL**
+  - Added shape/empty-input validation for RL rewards, REINFORCE, and DPO helpers.
+  - Fixed tie-aware ListMLE and graph-connected no-valid-pair loss returns.
+  - Corrected RLTrainer multi-iteration gradient scaling and reference-logit handling.
+- **Evaluation and Reporting**
+  - Normalized local/API reranker return contracts for MTEB evaluation.
+  - Fixed MTEB v2 qrels-only fallback inflation, two-stage API rerank construction,
+    NumPy JSON serialization, and zero-score report aggregation.
+- **Docs and Tests**
+  - Updated release workflow text, README examples, Chinese README, and regression coverage
+    for CLI, data, loss, metric, and evaluation paths.
+
 ## [0.2.0] - 2026-06-05
 
 ### Added

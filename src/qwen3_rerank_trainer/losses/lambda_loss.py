@@ -362,12 +362,12 @@ def lambda_loss(
 
     masked_losses = losses[final_mask]
     if masked_losses.numel() == 0:
-        loss_val = torch.tensor(0.0, device=device, requires_grad=True)
+        loss_val = scores.sum() * 0.0
     else:
         loss_val = masked_losses.mean()
 
     if reduction == "none":
-        loss_per_query = torch.zeros(B, device=device)
+        loss_per_query = scores.sum(dim=1) * 0.0
         for i in range(B):
             query_mask = final_mask[i]
             if query_mask.any():

@@ -34,11 +34,18 @@ Usage:
 # SFT 训练组件
 from .dataset import RerankDataset, StreamingRerankDataset, load_data, iter_data
 from .collator import RerankCollator
-from .sft_trainer import ContrastiveSFTTrainer
+try:
+    from .sft_trainer import ContrastiveSFTTrainer
+except Exception:
+    ContrastiveSFTTrainer = None
 
 # RL 训练组件
 from .rl_dataset import RLRerankDataset, StreamingRLRerankDataset, RLCollator
-from .rl_trainer import RLTrainer, load_sft_model
+try:
+    from .rl_trainer import RLTrainer, load_sft_model
+except Exception:
+    RLTrainer = None
+    load_sft_model = None
 
 __all__ = [
     # SFT

@@ -56,13 +56,19 @@ def tokenize_for_training(
     for i, input_ids in enumerate(encoded['input_ids']):
         encoded['input_ids'][i] = prefix_tokens + input_ids + suffix_tokens
 
-    tokenizer.padding_side = 'left'
-    inputs = tokenizer.pad(
-        {'input_ids': encoded['input_ids']},
-        padding=True,
-        return_tensors='pt',
-        max_length=max_length,
-    )
+    old_padding_side = getattr(tokenizer, "padding_side", None)
+    if old_padding_side is not None:
+        tokenizer.padding_side = 'left'
+    try:
+        inputs = tokenizer.pad(
+            {'input_ids': encoded['input_ids']},
+            padding=True,
+            return_tensors='pt',
+            max_length=max_length,
+        )
+    finally:
+        if old_padding_side is not None:
+            tokenizer.padding_side = old_padding_side
 
     yes_token_id = tokenizer.convert_tokens_to_ids("yes")
     no_token_id = tokenizer.convert_tokens_to_ids("no")

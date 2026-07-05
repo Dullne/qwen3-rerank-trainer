@@ -246,11 +246,12 @@ async def call_rerank_batch_async(
     Returns:
         [(ranking, scores), ...] 结果列表，与输入顺序对应
     """
-    if not AIOHTTP_AVAILABLE:
-        raise RuntimeError("aiohttp not installed, please run: pip install aiohttp")
-
+    if max_concurrency < 1:
+        raise ValueError("max_concurrency must be >= 1")
     if not items:
         return []
+    if not AIOHTTP_AVAILABLE:
+        raise RuntimeError("aiohttp not installed, please run: pip install aiohttp")
 
     results: List[Optional[Tuple[List[int], Dict[int, float]]]] = [None] * len(items)
     total = len(items)

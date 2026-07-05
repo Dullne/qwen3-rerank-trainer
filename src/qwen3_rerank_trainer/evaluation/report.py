@@ -26,6 +26,27 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 
+def _json_safe(value: Any) -> Any:
+    """Convert NumPy/PyTorch-like values and containers into JSON-safe objects."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, set):
+        return [_json_safe(v) for v in sorted(value, key=str)]
+    if hasattr(value, "tolist"):
+        try:
+            return _json_safe(value.tolist())
+        except Exception:
+            pass
+    if hasattr(value, "item"):
+        try:
+            return _json_safe(value.item())
+        except Exception:
+            pass
+    return value
+
+
 # ============================================================================
 # 报告配置
 # ============================================================================
@@ -214,7 +235,7 @@ def _generate_single_model_report(
         json_data["model_info"] = model_info
 
     with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(json_data, f, indent=2, ensure_ascii=False)
+        json.dump(_json_safe(json_data), f, indent=2, ensure_ascii=False)
 
     # Markdown
     md_path = output_dir / f"report_{timestamp}.md"
@@ -314,7 +335,7 @@ def _generate_multi_model_report(
     # JSON
     json_path = output_dir / "comparison.json"
     with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(comparison, f, indent=2, ensure_ascii=False)
+        json.dump(_json_safe(comparison), f, indent=2, ensure_ascii=False)
 
     # Markdown
     md_path = output_dir / "report.md"
@@ -383,9 +404,9 @@ def _generate_multi_model_report(
             scores = []
             for task in all_tasks:
                 task_scores = comparison["results"].get(model, {}).get(task, {})
-                primary_score = task_scores.get(config.primary_metric, 0)
+                primary_score = task_scores.get(config.primary_metric)
 
-                if primary_score > 0:
+                if primary_score is not None:
                     scores.append(primary_score)
 
                     # 记录每个数据集的最佳
@@ -513,7 +534,7 @@ def save_results_json(
         data["metadata"] = metadata
 
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(_json_safe(data), f, indent=2, ensure_ascii=False)
 
     return output_path
 

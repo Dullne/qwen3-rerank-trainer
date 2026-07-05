@@ -13,6 +13,69 @@ import torch
 import torch.nn.functional as F
 
 
+def _tie_aware_pl_loss(
+    scores: torch.Tensor,
+    labels: torch.Tensor,
+    *,
+    temperature: float,
+    position_aware: bool = False,
+    eps: float = 1e-10,
+) -> torch.Tensor:
+    """Plackett-Luce loss over relevance groups, without ordering ties."""
+    if temperature <= 0:
+        raise ValueError("temperature must be > 0")
+
+    scaled_scores = scores / float(temperature)
+    row_losses = []
+
+    for row_scores, row_labels in zip(scaled_scores, labels):
+        valid_mask = torch.isfinite(row_labels)
+        row_scores = row_scores[valid_mask]
+        row_labels = row_labels[valid_mask]
+
+        if row_scores.numel() <= 1:
+            row_losses.append(scaled_scores.new_zeros(()))
+            continue
+
+        levels = torch.unique(row_labels)
+        levels, _ = levels.sort(descending=True)
+        if levels.numel() <= 1:
+            row_losses.append(scaled_scores.new_zeros(()))
+            continue
+
+        remaining = torch.ones(row_scores.numel(), dtype=torch.bool, device=row_scores.device)
+        row_loss = scaled_scores.new_zeros(())
+        weight_offset = 0
+
+        if position_aware:
+            positions = torch.arange(row_scores.numel(), device=row_scores.device, dtype=row_scores.dtype)
+            n_valid = row_scores.new_tensor(float(row_scores.numel()))
+            weights = torch.pow(row_scores.new_tensor(2.0), n_valid - positions) - 1.0
+            weights = weights / weights.sum().clamp(min=eps)
+
+        for level in levels[:-1]:
+            group_mask = remaining & (row_labels == level)
+            group_size = int(group_mask.sum().item())
+            if group_size == 0:
+                continue
+
+            denom = torch.logsumexp(row_scores[remaining], dim=0)
+            group_terms = -(row_scores[group_mask] - denom)
+            term = group_terms.mean()
+
+            if position_aware:
+                group_weight = weights[weight_offset:weight_offset + group_size].sum()
+                term = term * group_weight
+                weight_offset += group_size
+
+            row_loss = row_loss + term
+            remaining = remaining & ~group_mask
+
+        row_losses.append(row_loss)
+
+    return torch.stack(row_losses)
+
+
 def listwise_softmax_ce(
     scores: torch.Tensor,
     targets: torch.Tensor,
@@ -46,18 +109,23 @@ def listwise_softmax_ce(
     scores = scores / float(score_temperature)
     targets = targets / float(target_temperature)
 
-    # Support padding with -inf in targets (ignored in softmax)
+    # Support padding with -inf in targets (ignored in softmax).
     valid_mask = torch.isfinite(targets)
+    has_valid = valid_mask.any(dim=-1, keepdim=True)
     scores = scores.masked_fill(~valid_mask, float("-inf"))
     targets = targets.masked_fill(~valid_mask, float("-inf"))
 
+    # All-padding rows would make softmax/log_softmax return NaNs.
+    scores = torch.where(has_valid, scores, torch.zeros_like(scores))
+    targets = torch.where(has_valid, targets, torch.zeros_like(targets))
+
     p_target = torch.softmax(targets, dim=-1)
     log_p_model = torch.log_softmax(scores, dim=-1)
-    loss = -(p_target * log_p_model).sum(dim=-1)
+    terms = torch.where(valid_mask, p_target * log_p_model, torch.zeros_like(log_p_model))
+    loss = -terms.sum(dim=-1)
 
     # Rows with all padding -> zero loss
-    has_valid = valid_mask.any(dim=-1)
-    loss = torch.where(has_valid, loss, torch.zeros_like(loss))
+    loss = torch.where(has_valid.squeeze(-1), loss, torch.zeros_like(loss))
 
     if reduction == "none":
         return loss
@@ -100,31 +168,13 @@ def list_mle(
     if scores.shape != labels.shape:
         raise ValueError(f"scores shape {tuple(scores.shape)} != labels shape {tuple(labels.shape)}")
 
-    B, M = scores.shape
-
-    valid_mask = labels > float('-inf')
-    num_valid = valid_mask.sum(dim=-1)
-
-    scores = scores / temperature
-
-    _, sorted_indices = labels.sort(descending=True, dim=-1)
-
-    sorted_scores = torch.gather(scores, dim=-1, index=sorted_indices)
-    sorted_mask = torch.gather(valid_mask, dim=-1, index=sorted_indices)
-
-    sorted_scores = sorted_scores.masked_fill(~sorted_mask, float('-inf'))
-
-    flipped = torch.flip(sorted_scores, dims=[-1])
-    log_cumsum_flipped = torch.logcumsumexp(flipped, dim=-1)
-    log_cumsum = torch.flip(log_cumsum_flipped, dims=[-1])
-
-    log_probs = sorted_scores - log_cumsum
-
-    log_probs = log_probs.masked_fill(~sorted_mask, 0.0)
-
-    loss = -log_probs.sum(dim=-1)
-
-    num_valid = num_valid.clamp(min=1)
+    loss = _tie_aware_pl_loss(
+        scores,
+        labels,
+        temperature=temperature,
+        position_aware=False,
+        eps=eps,
+    )
 
     if reduction == "none":
         return loss
@@ -166,38 +216,13 @@ def p_list_mle(
     if scores.shape != labels.shape:
         raise ValueError(f"scores shape {tuple(scores.shape)} != labels shape {tuple(labels.shape)}")
 
-    B, M = scores.shape
-    device = scores.device
-
-    valid_mask = labels > float('-inf')
-    num_valid = valid_mask.sum(dim=-1)
-
-    scores = scores / temperature
-
-    _, sorted_indices = labels.sort(descending=True, dim=-1)
-    sorted_scores = torch.gather(scores, dim=-1, index=sorted_indices)
-    sorted_mask = torch.gather(valid_mask, dim=-1, index=sorted_indices)
-
-    sorted_scores = sorted_scores.masked_fill(~sorted_mask, float('-inf'))
-
-    flipped = torch.flip(sorted_scores, dims=[-1])
-    log_cumsum_flipped = torch.logcumsumexp(flipped, dim=-1)
-    log_cumsum = torch.flip(log_cumsum_flipped, dims=[-1])
-
-    log_probs = sorted_scores - log_cumsum
-
-    positions = torch.arange(M, device=device).float().unsqueeze(0)
-    weights = torch.pow(2.0, num_valid.unsqueeze(1) - positions) - 1.0
-    weights = weights.clamp(min=0.0)
-
-    weights_sum = weights.sum(dim=-1, keepdim=True).clamp(min=eps)
-    weights = weights / weights_sum
-
-    log_probs = log_probs.masked_fill(~sorted_mask, 0.0)
-    weights = weights.masked_fill(~sorted_mask, 0.0)
-
-    weighted_log_probs = log_probs * weights
-    loss = -weighted_log_probs.sum(dim=-1)
+    loss = _tie_aware_pl_loss(
+        scores,
+        labels,
+        temperature=temperature,
+        position_aware=True,
+        eps=eps,
+    )
 
     if reduction == "none":
         return loss

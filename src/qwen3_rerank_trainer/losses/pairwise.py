@@ -77,7 +77,7 @@ def ranknet_loss(
     pair_mask = pos_mask.unsqueeze(2) & neg_mask.unsqueeze(1)  # [B, L, L]
 
     if not pair_mask.any():
-        return torch.tensor(0.0, device=scores.device)
+        return scores.sum() * 0.0
 
     # 估算 pair 数，超限则分块计算
     total_pairs = pair_mask.sum().item()
@@ -102,6 +102,6 @@ def ranknet_loss(
         num_pairs += pair_loss.numel()
 
     if num_pairs == 0:
-        return torch.tensor(0.0, device=scores.device)
+        return scores.sum() * 0.0
 
     return total_loss / num_pairs

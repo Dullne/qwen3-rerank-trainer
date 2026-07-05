@@ -3,18 +3,46 @@ Rerank Dataset for SFT Training
 
 支持多种数据格式的重排序数据集。
 """
+import json
 import random
 import logging
+from itertools import islice
 from pathlib import Path
 from typing import List, Dict, Optional
-
-from datasets import load_dataset as hf_load_dataset
 
 from torch.utils.data import Dataset, IterableDataset, get_worker_info
 
 from ..data.formatting import PREFIX, SUFFIX, format_input
 
 logger = logging.getLogger(__name__)
+
+
+def _load_hf_dataset(*args, **kwargs):
+    try:
+        from datasets import load_dataset as hf_load_dataset
+    except Exception as exc:
+        raise RuntimeError(
+            "Loading this data format requires a working 'datasets' installation"
+        ) from exc
+    return hf_load_dataset(*args, **kwargs)
+
+
+LIST_FIELD_KEYS = [
+    "positives",
+    "negatives",
+    "positive",
+    "negative",
+    "pos",
+    "positives_strong",
+    "positives_medium",
+    "positives_weak",
+    "neg_very_hard",
+    "neg_hard",
+    "neg_medium",
+    "statement_very_hard_negatives",
+    "statement_hard_negatives",
+    "statement_medium_negatives",
+]
 
 
 def _parse_list_field(value):
@@ -82,11 +110,45 @@ def _normalize_columns(row: Dict) -> Dict:
         row["negatives"] = row.pop("negative")
 
     # 处理 CSV 加载时列表变字符串的问题
-    for key in ["positives", "negatives", "pos", "neg_very_hard", "neg_hard", "neg_medium"]:
+    for key in LIST_FIELD_KEYS:
         if key in row:
             row[key] = _parse_list_field(row[key])
 
     return row
+
+
+def _iter_data_for_worker(data_path: str):
+    worker_info = get_worker_info()
+    if worker_info is None:
+        yield from iter_data(data_path)
+        return
+
+    yield from islice(iter_data(data_path), worker_info.id, None, worker_info.num_workers)
+
+
+def _as_list(value) -> List:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, set):
+        return sorted(value, key=str)
+    return [value]
+
+
+def _clean_text_list(values) -> List[str]:
+    cleaned = []
+    for value in _as_list(values):
+        if isinstance(value, dict):
+            value = value.get("statement", "") or value.get("text", "")
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            cleaned.append(text)
+    return cleaned
 
 
 def load_data(data_path: str) -> List[Dict]:
@@ -129,7 +191,25 @@ def load_data(data_path: str) -> List[Dict]:
         raise ValueError(f"不支持的文件格式: {suffix}，支持: {list(format_map.keys())}")
 
     logger.info(f"加载数据文件: {path} (格式: {format_map[suffix]})")
-    ds = hf_load_dataset(format_map[suffix], data_files=str(path), split="train")
+
+    if suffix == ".jsonl":
+        records = []
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    records.append(json.loads(line))
+        return [_normalize_columns(dict(row)) for row in records]
+
+    if suffix == ".json":
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            data = data["data"]
+        elif isinstance(data, dict):
+            data = [data]
+        return [_normalize_columns(dict(row)) for row in data]
+
+    ds = _load_hf_dataset(format_map[suffix], data_files=str(path), split="train")
     return [_normalize_columns(dict(row)) for row in ds]
 
 
@@ -170,7 +250,20 @@ def iter_data(data_path: str):
         raise ValueError(f"不支持的文件格式: {suffix}，支持: {list(format_map.keys())}")
 
     logger.info(f"流式加载数据文件: {path} (格式: {format_map[suffix]})")
-    ds = hf_load_dataset(format_map[suffix], data_files=str(path), split="train", streaming=True)
+
+    if suffix == ".jsonl":
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    yield _normalize_columns(json.loads(line))
+        return
+
+    if suffix == ".json":
+        for row in load_data(str(path)):
+            yield row
+        return
+
+    ds = _load_hf_dataset(format_map[suffix], data_files=str(path), split="train", streaming=True)
     for row in ds:
         yield _normalize_columns(dict(row))
 
@@ -294,32 +387,27 @@ class RerankDataset(Dataset):
     def _extract_positives(self, item: Dict, is_simple_format: bool) -> List[str]:
         """提取正例"""
         if is_simple_format:
-            return item.get("positives", [])
+            return _clean_text_list(item.get("positives", []))
 
         positives = []
         if item.get("answer"):
             positives.append(item["answer"])
-        positives.extend(item.get("pos", []) or [])
-        positives.extend(item.get("positives_strong", []) or [])
-        positives.extend(item.get("positives_medium", []) or [])
-        positives.extend(item.get("positives_weak", []) or [])
-        return positives
+        positives.extend(_clean_text_list(item.get("pos", [])))
+        positives.extend(_clean_text_list(item.get("positives_strong", [])))
+        positives.extend(_clean_text_list(item.get("positives_medium", [])))
+        positives.extend(_clean_text_list(item.get("positives_weak", [])))
+        return _clean_text_list(positives)
 
     def _extract_negatives(self, item: Dict, is_simple_format: bool) -> List[str]:
         """提取负例"""
         if is_simple_format:
-            return item.get("negatives", [])
+            return _clean_text_list(item.get("negatives", []))
 
         negatives = []
         for key in ["neg_very_hard", "neg_hard", "neg_medium",
                    "statement_very_hard_negatives", "statement_hard_negatives", "statement_medium_negatives"]:
-            negs = item.get(key, []) or []
-            for neg in negs:
-                if isinstance(neg, dict):
-                    negatives.append(neg.get("statement", "") or neg.get("text", ""))
-                else:
-                    negatives.append(str(neg))
-        return [n.strip() for n in negatives if n and n.strip()]
+            negatives.extend(_clean_text_list(item.get(key, [])))
+        return negatives
 
     def _has_enough_docs(self, positives: List[str], negatives: List[str]) -> bool:
         """检查是否有足够的文档"""
@@ -447,7 +535,7 @@ class StreamingRerankDataset(IterableDataset):
     def __iter__(self):
         rng = self._get_rng()
         count = 0
-        for item in iter_data(self.data_file):
+        for item in _iter_data_for_worker(self.data_file):
             query = item.get("query", "")
             if not query:
                 continue
@@ -507,29 +595,24 @@ class StreamingRerankDataset(IterableDataset):
 
     def _extract_positives(self, item: Dict, is_simple_format: bool) -> List[str]:
         if is_simple_format:
-            return item.get("positives", [])
+            return _clean_text_list(item.get("positives", []))
         positives = []
         if item.get("answer"):
             positives.append(item["answer"])
-        positives.extend(item.get("pos", []) or [])
-        positives.extend(item.get("positives_strong", []) or [])
-        positives.extend(item.get("positives_medium", []) or [])
-        positives.extend(item.get("positives_weak", []) or [])
-        return positives
+        positives.extend(_clean_text_list(item.get("pos", [])))
+        positives.extend(_clean_text_list(item.get("positives_strong", [])))
+        positives.extend(_clean_text_list(item.get("positives_medium", [])))
+        positives.extend(_clean_text_list(item.get("positives_weak", [])))
+        return _clean_text_list(positives)
 
     def _extract_negatives(self, item: Dict, is_simple_format: bool) -> List[str]:
         if is_simple_format:
-            return item.get("negatives", [])
+            return _clean_text_list(item.get("negatives", []))
         negatives = []
         for key in ["neg_very_hard", "neg_hard", "neg_medium",
                    "statement_very_hard_negatives", "statement_hard_negatives", "statement_medium_negatives"]:
-            negs = item.get(key, []) or []
-            for neg in negs:
-                if isinstance(neg, dict):
-                    negatives.append(neg.get("statement", "") or neg.get("text", ""))
-                else:
-                    negatives.append(str(neg))
-        return [n.strip() for n in negatives if n and n.strip()]
+            negatives.extend(_clean_text_list(item.get(key, [])))
+        return negatives
 
     def _has_enough_docs(self, positives: List[str], negatives: List[str]) -> bool:
         if self.n_docs == 0:

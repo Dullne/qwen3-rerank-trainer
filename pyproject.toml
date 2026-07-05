@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qwen3-rerank-trainer"
-version = "0.2.0"
+version = "0.2.1"
 description = "Training and evaluation toolkit for Qwen3-Reranker"
 readme = "README.md"
 license = "MIT"
@@ -31,6 +31,7 @@ dependencies = [
     "torch>=2.0.0",
     "numpy>=1.20.0",
     "datasets>=2.0.0",
+    "pyarrow<21",
 ]
 
 [project.optional-dependencies]

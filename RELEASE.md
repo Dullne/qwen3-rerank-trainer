@@ -1,6 +1,6 @@
 # Release Workflow
 
-`/data/train_res/code/rerank/qwen3-rerank-trainer` is the single source of truth for the
+This repository is the single source of truth for the
 `qwen3-rerank-trainer` package.
 
 All new loss functions, RL logic, training changes, evaluation changes, and packaging updates

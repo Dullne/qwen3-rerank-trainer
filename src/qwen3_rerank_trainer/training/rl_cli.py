@@ -22,11 +22,8 @@ import argparse
 import random
 import numpy as np
 from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
-from peft import LoraConfig, get_peft_model, TaskType
 
 from .rl_dataset import RLRerankDataset, RLCollator
-from .rl_trainer import RLTrainer, load_sft_model
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -159,6 +156,10 @@ def parse_args():
     train_group.add_argument("--report_to", type=str, default="none",
                              choices=["none", "tensorboard", "wandb", "swanlab"],
                              help="日志报告工具")
+    train_group.add_argument("--bf16", action="store_true",
+                             help="使用 bf16 训练")
+    train_group.add_argument("--fp16", action="store_true",
+                             help="使用 fp16 训练")
 
     return parser.parse_args()
 
@@ -168,6 +169,9 @@ def main():
     args = parse_args()
 
     # 参数校验
+    if args.bf16 and args.fp16:
+        logger.error("--bf16 和 --fp16 不能同时指定")
+        sys.exit(1)
     if args.n_docs > 0 and args.n_pos > 0 and args.n_pos >= args.n_docs:
         logger.error(f"--n_pos ({args.n_pos}) 必须小于 --n_docs ({args.n_docs})")
         sys.exit(1)
@@ -192,6 +196,17 @@ def main():
         logger.error(f"SFT 模型不存在: {sft_model_path}")
         logger.error("请先运行 SFT 训练，或使用 --use_base_model 直接测试")
         sys.exit(1)
+
+    try:
+        from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
+        from peft import LoraConfig, get_peft_model, TaskType
+        from .rl_trainer import RLTrainer, load_sft_model
+    except Exception as exc:
+        logger.error(
+            "RL 训练依赖不可用，请运行: pip install -e '.[full]'；"
+            f"原始错误: {exc}"
+        )
+        return 1
 
     # 打印配置
     logger.info("=" * 60)
@@ -230,6 +245,8 @@ def main():
         logger.info(f"DPO beta: {args.dpo_beta}, reference_free: {args.dpo_reference_free}")
     logger.info("=" * 60)
 
+    torch_dtype = torch.bfloat16 if args.bf16 else (torch.float16 if args.fp16 else torch.float32)
+
     # 加载 tokenizer（left padding 确保 logits[:, -1, :] 取到正确位置）
     tokenizer = AutoTokenizer.from_pretrained(
         args.base_model,
@@ -249,11 +266,11 @@ def main():
         logger.info(f"加载基础模型: {args.base_model}")
         model = AutoModelForCausalLM.from_pretrained(
             args.base_model,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=torch_dtype,
             trust_remote_code=True,
         )
     else:
-        model = load_sft_model(str(sft_model_path), args.base_model)
+        model = load_sft_model(str(sft_model_path), args.base_model, torch_dtype=torch_dtype)
 
     # 添加新的 LoRA adapter
     lora_config = LoraConfig(
@@ -321,7 +338,8 @@ def main():
         load_best_model_at_end=val_dataset is not None,
         metric_for_best_model="eval_loss" if val_dataset else None,
         greater_is_better=False,
-        bf16=True,
+        bf16=args.bf16,
+        fp16=args.fp16,
         gradient_checkpointing=True,
         ddp_find_unused_parameters=False,
         dataloader_num_workers=0,
@@ -371,7 +389,7 @@ def main():
     # 2. Merge LoRA 并保存完整模型
     logger.info("Merging LoRA adapter with base model...")
     merged_model = trainer.model.merge_and_unload()
-    merged_model.save_pretrained(str(final_output_dir), torch_dtype=torch.bfloat16)
+    merged_model.save_pretrained(str(final_output_dir), torch_dtype=torch_dtype)
     tokenizer.save_pretrained(str(final_output_dir))
     logger.info(f"Merged 模型已保存: {final_output_dir}")
 

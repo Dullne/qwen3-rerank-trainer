@@ -11,7 +11,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from torch.utils.data import Dataset, IterableDataset, get_worker_info
 
-from .dataset import load_data, iter_data
+from .dataset import load_data, _clean_text_list, _iter_data_for_worker
 from ..data.formatting import PREFIX, SUFFIX, format_input
 
 logger = logging.getLogger(__name__)
@@ -147,32 +147,27 @@ class RLRerankDataset(Dataset):
     def _extract_positives(self, item: Dict, is_simple_format: bool) -> List[str]:
         """提取正例"""
         if is_simple_format:
-            return item.get("positives", [])
+            return _clean_text_list(item.get("positives", []))
 
         positives = []
         if item.get("answer"):
             positives.append(item["answer"])
-        positives.extend(item.get("pos", []) or [])
-        positives.extend(item.get("positives_strong", []) or [])
-        positives.extend(item.get("positives_medium", []) or [])
-        positives.extend(item.get("positives_weak", []) or [])
-        return positives
+        positives.extend(_clean_text_list(item.get("pos", [])))
+        positives.extend(_clean_text_list(item.get("positives_strong", [])))
+        positives.extend(_clean_text_list(item.get("positives_medium", [])))
+        positives.extend(_clean_text_list(item.get("positives_weak", [])))
+        return _clean_text_list(positives)
 
     def _extract_negatives(self, item: Dict, is_simple_format: bool) -> List[str]:
         """提取负例"""
         if is_simple_format:
-            return item.get("negatives", [])
+            return _clean_text_list(item.get("negatives", []))
 
         negatives = []
         for key in ["neg_very_hard", "neg_hard", "neg_medium",
                    "statement_very_hard_negatives", "statement_hard_negatives", "statement_medium_negatives"]:
-            negs = item.get(key, []) or []
-            for neg in negs:
-                if isinstance(neg, dict):
-                    negatives.append(neg.get("statement", "") or neg.get("text", ""))
-                else:
-                    negatives.append(str(neg))
-        return [n.strip() for n in negatives if n and n.strip()]
+            negatives.extend(_clean_text_list(item.get(key, [])))
+        return negatives
 
     def _has_enough_docs(self, positives: List[str], negatives: List[str]) -> bool:
         """检查是否有足够的文档"""
@@ -320,14 +315,21 @@ class RLCollator:
                 all_texts.append(text)
                 all_labels.append(label)
 
-        encoded = self.tokenizer(
-            all_texts,
-            max_length=self.max_length,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
-            pad_to_multiple_of=self.pad_to_multiple_of,
-        )
+        old_padding_side = getattr(self.tokenizer, "padding_side", None)
+        if old_padding_side is not None:
+            self.tokenizer.padding_side = "left"
+        try:
+            encoded = self.tokenizer(
+                all_texts,
+                max_length=self.max_length,
+                padding=True,
+                truncation=True,
+                return_tensors="pt",
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
+        finally:
+            if old_padding_side is not None:
+                self.tokenizer.padding_side = old_padding_side
 
         return {
             "input_ids": encoded["input_ids"],
@@ -378,7 +380,7 @@ class StreamingRLRerankDataset(IterableDataset):
     def __iter__(self):
         rng = self._get_rng()
         count = 0
-        for item in iter_data(self.data_file):
+        for item in _iter_data_for_worker(self.data_file):
             query = item.get("query", "")
             if not query:
                 continue
@@ -453,29 +455,24 @@ class StreamingRLRerankDataset(IterableDataset):
 
     def _extract_positives(self, item: Dict, is_simple_format: bool) -> List[str]:
         if is_simple_format:
-            return item.get("positives", [])
+            return _clean_text_list(item.get("positives", []))
         positives = []
         if item.get("answer"):
             positives.append(item["answer"])
-        positives.extend(item.get("pos", []) or [])
-        positives.extend(item.get("positives_strong", []) or [])
-        positives.extend(item.get("positives_medium", []) or [])
-        positives.extend(item.get("positives_weak", []) or [])
-        return positives
+        positives.extend(_clean_text_list(item.get("pos", [])))
+        positives.extend(_clean_text_list(item.get("positives_strong", [])))
+        positives.extend(_clean_text_list(item.get("positives_medium", [])))
+        positives.extend(_clean_text_list(item.get("positives_weak", [])))
+        return _clean_text_list(positives)
 
     def _extract_negatives(self, item: Dict, is_simple_format: bool) -> List[str]:
         if is_simple_format:
-            return item.get("negatives", [])
+            return _clean_text_list(item.get("negatives", []))
         negatives = []
         for key in ["neg_very_hard", "neg_hard", "neg_medium",
                    "statement_very_hard_negatives", "statement_hard_negatives", "statement_medium_negatives"]:
-            negs = item.get(key, []) or []
-            for neg in negs:
-                if isinstance(neg, dict):
-                    negatives.append(neg.get("statement", "") or neg.get("text", ""))
-                else:
-                    negatives.append(str(neg))
-        return [n.strip() for n in negatives if n and n.strip()]
+            negatives.extend(_clean_text_list(item.get(key, [])))
+        return negatives
 
     def _has_enough_docs(self, positives: List[str], negatives: List[str]) -> bool:
         if self.n_docs == 0:

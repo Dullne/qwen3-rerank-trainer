@@ -44,6 +44,11 @@ def infonce_loss(
             pos_count = pos_mask.sum(dim=-1)
             if (pos_count == 0).any():
                 raise ValueError("InfoNCE requires at least 1 positive per row")
+            if (pos_count != 1).any():
+                raise ValueError(
+                    "mode='single' requires exactly 1 positive per row; "
+                    "use mode='posset' or mode='avgpos' for multi-positive groups"
+                )
             positive_indices = pos_mask.float().argmax(dim=-1)
         else:
             if positive_indices.ndim != 1:
@@ -107,4 +112,3 @@ def infonce_loss(
         raise ValueError(f"Unsupported reduction: {reduction!r}")
 
     raise ValueError(f"Unsupported mode for infonce_loss: {mode!r}")
-

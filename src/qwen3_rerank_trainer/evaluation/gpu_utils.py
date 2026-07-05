@@ -104,6 +104,9 @@ def get_gpu_semaphores(
     Returns:
         {gpu_id: Semaphore} 字典
     """
+    if total_workers < 1:
+        raise ValueError("total_workers must be >= 1")
+
     # 按 GPU 分组
     gpu_models = {}
     for model in models:
@@ -113,7 +116,7 @@ def get_gpu_semaphores(
         gpu_models[gpu].append(model)
 
     num_gpus = len(gpu_models)
-    if num_gpus == 0 or total_workers == 0:
+    if num_gpus == 0:
         return {}
 
     # 均分 workers
@@ -139,6 +142,9 @@ def get_gpu_semaphores_async(
     """
     异步版本：计算每个 GPU 的 asyncio.Semaphore
     """
+    if total_workers < 1:
+        raise ValueError("total_workers must be >= 1")
+
     gpu_models = {}
     for model in models:
         gpu = gpu_info.get(model, 0)
@@ -147,7 +153,7 @@ def get_gpu_semaphores_async(
         gpu_models[gpu].append(model)
 
     num_gpus = len(gpu_models)
-    if num_gpus == 0 or total_workers == 0:
+    if num_gpus == 0:
         return {}
 
     base_per_gpu = total_workers // num_gpus
@@ -224,6 +230,9 @@ def run_with_gpu_balance(
     Returns:
         {model_name: result} 字典
     """
+    if total_workers < 1:
+        raise ValueError("total_workers must be >= 1")
+
     # 获取 GPU Semaphores
     gpu_semaphores = get_gpu_semaphores(models, gpu_info, total_workers)
 
@@ -290,6 +299,9 @@ async def run_with_gpu_balance_async(
     Returns:
         {model_name: result} 字典
     """
+    if total_workers < 1:
+        raise ValueError("total_workers must be >= 1")
+
     gpu_semaphores = get_gpu_semaphores_async(models, gpu_info, total_workers)
     interleaved = get_interleaved_order(models, gpu_info)
 

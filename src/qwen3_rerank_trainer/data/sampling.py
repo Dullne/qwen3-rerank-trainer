@@ -46,8 +46,7 @@ def sample_documents(
         selected_docs: List[str], 选中的文档文本
         selected_labels: List[int], 对应的标签
     """
-    if seed is not None:
-        random.seed(seed)
+    rng = random.Random(seed) if seed is not None else random
 
     positives = [d for d in docs if d["label"] == 1]
     negatives = [d for d in docs if d["label"] == 0]
@@ -70,25 +69,25 @@ def sample_documents(
 
     n_pos_actual = min(n_pos_target, len(positives))
     if n_pos_actual > 0:
-        selected_pos = random.sample(positives, n_pos_actual) if len(positives) > n_pos_actual else positives.copy()
+        selected_pos = rng.sample(positives, n_pos_actual) if len(positives) > n_pos_actual else positives.copy()
         selected.extend(selected_pos)
 
     n_neg_needed = min(n_neg_target, n_total - len(selected))
 
     if n_neg_needed > 0 and negatives:
         if neg_distribution:
-            selected_neg = _sample_by_difficulty(negatives, neg_distribution, n_neg_needed)
+            selected_neg = _sample_by_difficulty(negatives, neg_distribution, n_neg_needed, rng)
         else:
             n_neg_actual = min(n_neg_needed, len(negatives))
-            selected_neg = random.sample(negatives, n_neg_actual) if len(negatives) > n_neg_actual else negatives.copy()
+            selected_neg = rng.sample(negatives, n_neg_actual) if len(negatives) > n_neg_actual else negatives.copy()
         selected.extend(selected_neg)
 
     if allow_repeat:
         while len(selected) < n_total and docs:
-            selected.append(random.choice(docs))
+            selected.append(rng.choice(docs))
 
     if shuffle:
-        random.shuffle(selected)
+        rng.shuffle(selected)
 
     selected_docs = [d["text"] for d in selected]
     selected_labels = [d["label"] for d in selected]
@@ -100,6 +99,7 @@ def _sample_by_difficulty(
     negatives: List[Dict],
     distribution: Dict[str, int],
     n_needed: int,
+    rng=random,
 ) -> List[Dict]:
     """按难度分布采样负例"""
     by_difficulty = {}
@@ -116,7 +116,7 @@ def _sample_by_difficulty(
             pool = by_difficulty[difficulty]
             n_sample = min(count, len(pool), n_needed - len(selected))
             if n_sample > 0:
-                selected.extend(random.sample(pool, n_sample))
+                selected.extend(rng.sample(pool, n_sample))
 
         if len(selected) >= n_needed:
             break
@@ -125,7 +125,7 @@ def _sample_by_difficulty(
         remaining = [n for n in negatives if n not in selected]
         n_extra = min(n_needed - len(selected), len(remaining))
         if n_extra > 0:
-            selected.extend(random.sample(remaining, n_extra))
+            selected.extend(rng.sample(remaining, n_extra))
 
     return selected[:n_needed]
 
@@ -158,8 +158,7 @@ def sample_documents_by_score(
         selected_docs: List[str], 选中的文档文本
         selected_labels: List[int], 对应的标签
     """
-    if seed is not None:
-        random.seed(seed)
+    rng = random.Random(seed) if seed is not None else random
 
     positives = [d for d in docs if d["label"] == 1]
     negatives = [d for d in docs if d["label"] == 0]
@@ -182,7 +181,7 @@ def sample_documents_by_score(
 
     n_pos_actual = min(n_pos_target, len(positives))
     if n_pos_actual > 0:
-        selected_pos = random.sample(positives, n_pos_actual) if len(positives) > n_pos_actual else positives.copy()
+        selected_pos = rng.sample(positives, n_pos_actual) if len(positives) > n_pos_actual else positives.copy()
         selected.extend(selected_pos)
 
     n_neg_needed = min(n_neg_target, n_total - len(selected), len(negatives))
@@ -196,14 +195,20 @@ def sample_documents_by_score(
         hard_pool = negatives_sorted[:mid] if mid > 0 else negatives_sorted
         easy_pool = negatives_sorted[mid:] if mid > 0 else []
 
-        selected_hard = random.sample(hard_pool, min(n_hard, len(hard_pool))) if hard_pool else []
-        selected_easy = random.sample(easy_pool, min(n_easy, len(easy_pool))) if easy_pool else []
+        selected_hard = rng.sample(hard_pool, min(n_hard, len(hard_pool))) if hard_pool else []
+        selected_easy = rng.sample(easy_pool, min(n_easy, len(easy_pool))) if easy_pool else []
 
         selected.extend(selected_hard)
         selected.extend(selected_easy)
+        if len(selected_hard) + len(selected_easy) < n_neg_needed:
+            selected_ids = {id(item) for item in selected_hard + selected_easy}
+            remaining = [n for n in negatives_sorted if id(n) not in selected_ids]
+            n_extra = min(n_neg_needed - len(selected_hard) - len(selected_easy), len(remaining))
+            if n_extra > 0:
+                selected.extend(rng.sample(remaining, n_extra))
 
     if shuffle:
-        random.shuffle(selected)
+        rng.shuffle(selected)
 
     selected_docs = [d["text"] for d in selected]
     selected_labels = [d["label"] for d in selected]

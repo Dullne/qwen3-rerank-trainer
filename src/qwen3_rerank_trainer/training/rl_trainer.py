@@ -138,6 +138,18 @@ class RLTrainer(Trainer):
             and hasattr(base_model, "disable_adapter_layers")
             and hasattr(base_model, "enable_adapter_layers")
         )
+        if need_ref and not has_adapter_toggle:
+            if self.kl_coef > 0:
+                raise ValueError(
+                    "kl_coef > 0 requires reference logits, but adapter layers are not available. "
+                    "Enable LoRA adapter or set kl_coef=0."
+                )
+            if self.loss_type == "dpo" and not self.reference_free:
+                raise ValueError(
+                    "DPO requires reference logits but adapter layers are not available. "
+                    "Enable LoRA adapter or set reference_free=True."
+                )
+
         # 分块处理当前组
         for chunk_start in range(0, group_size, self.chunk_size):
             chunk_end = min(chunk_start + self.chunk_size, group_size)
@@ -155,8 +167,10 @@ class RLTrainer(Trainer):
             if has_adapter_toggle:
                 with torch.no_grad():
                     base_model.disable_adapter_layers()
-                    ref_yes, ref_no = self._get_logits(model, chunk_ids, chunk_mask)
-                    base_model.enable_adapter_layers()
+                    try:
+                        ref_yes, ref_no = self._get_logits(model, chunk_ids, chunk_mask)
+                    finally:
+                        base_model.enable_adapter_layers()
                     group_ref_yes.append(ref_yes)
                     group_ref_no.append(ref_no)
 
@@ -189,8 +203,15 @@ class RLTrainer(Trainer):
                 if hasattr(base_model, "disable_adapter_layers") and hasattr(base_model, "enable_adapter_layers"):
                     with torch.no_grad():
                         base_model.disable_adapter_layers()
-                        ref_yes_logits, ref_no_logits = self._get_logits(model, input_ids, attention_mask)
-                        base_model.enable_adapter_layers()
+                        try:
+                            ref_yes_logits, ref_no_logits = self._get_logits(model, input_ids, attention_mask)
+                        finally:
+                            base_model.enable_adapter_layers()
+                elif self.kl_coef > 0:
+                    raise ValueError(
+                        "kl_coef > 0 requires reference logits, but adapter layers are not available. "
+                        "Enable LoRA adapter or set kl_coef=0."
+                    )
                 elif self.loss_type == "dpo" and not self.reference_free:
                     raise ValueError(
                         "DPO requires reference logits but adapter layers are not available. "
@@ -341,8 +362,12 @@ class RLTrainer(Trainer):
             if self.args.n_gpu > 1:
                 loss = loss.mean()
 
+            loss_for_backward = loss / self.num_iterations
+            if self.args.gradient_accumulation_steps > 1:
+                loss_for_backward = loss_for_backward / self.args.gradient_accumulation_steps
+
             # 反向传播
-            self.accelerator.backward(loss)
+            self.accelerator.backward(loss_for_backward)
             total_loss += loss.detach()
 
         # 返回平均 loss（用于日志）
