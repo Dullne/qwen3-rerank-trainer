@@ -15,18 +15,26 @@ Training and evaluation toolkit for Qwen3-Reranker.
 
 ```bash
 # Basic installation
-pip install -e .
+pip install qwen3-rerank-trainer
 
 # With inference support
-pip install -e ".[inference]"
+pip install "qwen3-rerank-trainer[inference]"
 
 # With MTEB evaluation
-pip install -e ".[eval]"
+pip install "qwen3-rerank-trainer[eval]"
 
 # With two-stage evaluation (Embedding + Rerank)
-pip install -e ".[evalscope]"
+pip install "qwen3-rerank-trainer[evalscope]"
 
 # Full installation
+pip install "qwen3-rerank-trainer[full]"
+```
+
+For development from source:
+
+```bash
+git clone https://github.com/Dullne/qwen3-rerank-trainer.git
+cd qwen3-rerank-trainer
 pip install -e ".[full]"
 ```
 
@@ -52,7 +60,7 @@ Note: `lambda_rank_loss` and `lambda_loss_ndcg/map/mrr` have been merged into `l
 ### SFT Training
 
 ```bash
-# Command line (requires pip install -e ".[full]")
+# Command line (requires pip install "qwen3-rerank-trainer[full]")
 qwen3-rerank-train --model /path/to/Qwen3-Reranker-4B --data train.jsonl --output outputs/sft
 
 # With LoRA
@@ -114,7 +122,7 @@ trainer.train()
 ### RL Training
 
 ```bash
-# Command line (requires pip install -e ".[full]")
+# Command line (requires pip install "qwen3-rerank-trainer[full]")
 # Basic RL training (run SFT first)
 qwen3-rerank-train-rl --sft_model outputs/sft/final --data train.jsonl --output outputs/rl
 
@@ -296,7 +304,7 @@ results = call_rerank_batch(
 
 ```bash
 # Install with eval support
-pip install -e ".[eval]"
+pip install "qwen3-rerank-trainer[eval]"
 
 # List supported datasets
 qwen3-rerank-eval --list-datasets
@@ -355,10 +363,6 @@ text = format_input(query, document)
 sampled_docs, sampled_labels = sample_documents(docs, n_total=10, n_pos=2)
 ```
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Dullne/qwen3-rerank-trainer&type=Date)](https://www.star-history.com/#Dullne/qwen3-rerank-trainer&Date)
-
 ## Package Structure
 
 ```
@@ -399,3 +403,7 @@ qwen3_rerank_trainer/
 ## License
 
 MIT
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Dullne/qwen3-rerank-trainer&type=Date)](https://www.star-history.com/#Dullne/qwen3-rerank-trainer&Date)

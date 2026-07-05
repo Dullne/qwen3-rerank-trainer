@@ -15,18 +15,26 @@
 
 ```bash
 # 基础安装
-pip install -e .
+pip install qwen3-rerank-trainer
 
 # 安装推理支持
-pip install -e ".[inference]"
+pip install "qwen3-rerank-trainer[inference]"
 
 # 安装 MTEB 评测支持
-pip install -e ".[eval]"
+pip install "qwen3-rerank-trainer[eval]"
 
 # 安装两阶段评测支持（Embedding + Rerank）
-pip install -e ".[evalscope]"
+pip install "qwen3-rerank-trainer[evalscope]"
 
 # 完整安装
+pip install "qwen3-rerank-trainer[full]"
+```
+
+如果需要从源码开发安装：
+
+```bash
+git clone https://github.com/Dullne/qwen3-rerank-trainer.git
+cd qwen3-rerank-trainer
 pip install -e ".[full]"
 ```
 
@@ -52,7 +60,7 @@ loss = lambda_loss(scores, labels, metric="ndcg")
 ### SFT 训练
 
 ```bash
-# 命令行（需要 pip install -e ".[full]"）
+# 命令行（需要 pip install "qwen3-rerank-trainer[full]"）
 qwen3-rerank-train --model /path/to/Qwen3-Reranker-4B --data train.jsonl --output outputs/sft
 
 # 使用 LoRA
@@ -114,7 +122,7 @@ trainer.train()
 ### RL 训练
 
 ```bash
-# 命令行（需要 pip install -e ".[full]"）
+# 命令行（需要 pip install "qwen3-rerank-trainer[full]"）
 # 基础 RL 训练（需要先完成 SFT 训练）
 qwen3-rerank-train-rl --sft_model outputs/sft/final --data train.jsonl --output outputs/rl
 
@@ -296,7 +304,7 @@ results = call_rerank_batch(
 
 ```bash
 # 安装 eval 依赖
-pip install -e ".[eval]"
+pip install "qwen3-rerank-trainer[eval]"
 
 # 列出支持的数据集
 qwen3-rerank-eval --list-datasets
@@ -355,10 +363,6 @@ text = format_input(query, document)
 sampled_docs, sampled_labels = sample_documents(docs, n_total=10, n_pos=2)
 ```
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Dullne/qwen3-rerank-trainer&type=Date)](https://www.star-history.com/#Dullne/qwen3-rerank-trainer&Date)
-
 ## 包结构
 
 ```
@@ -399,3 +403,7 @@ qwen3_rerank_trainer/
 ## 许可证
 
 MIT
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Dullne/qwen3-rerank-trainer&type=Date)](https://www.star-history.com/#Dullne/qwen3-rerank-trainer&Date)
