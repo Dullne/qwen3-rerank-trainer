@@ -67,3 +67,22 @@ def test_rl_cli_exposes_precision_flags_in_help():
     assert result.returncode == 0
     assert "--bf16" in result.stdout
     assert "--fp16" in result.stdout
+
+
+def test_sft_cli_rejects_invalid_fixed_positive_count_before_data_load():
+    result = _run_module(
+        "qwen3_rerank_trainer.training.cli",
+        "--model",
+        "/no/model",
+        "--data",
+        "/no/data",
+        "--n-docs",
+        "2",
+        "--n-pos",
+        "3",
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 1
+    assert "必须小于" in combined
+    assert "Traceback" not in combined

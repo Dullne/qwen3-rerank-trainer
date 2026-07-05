@@ -251,6 +251,13 @@ def main():
     """主函数"""
     args = parse_args()
 
+    if args.n_docs > 0 and args.n_pos > 0 and args.n_pos >= args.n_docs:
+        logger.error(f"--n-pos ({args.n_pos}) 必须小于 --n-docs ({args.n_docs})")
+        return 1
+    if args.n_docs == 0 and args.n_pos > 0:
+        logger.error("--n-docs=0（使用所有文档）时不能指定 --n-pos")
+        return 1
+
     # 检查数据文件
     if not os.path.exists(args.data):
         logger.error(f"数据文件不存在: {args.data}")
@@ -264,7 +271,7 @@ def main():
         from .sft_trainer import ContrastiveSFTTrainer, get_yes_no_token_ids
     except Exception as exc:
         logger.error(
-            "SFT 训练依赖不可用，请运行: pip install -e '.[full]'；"
+            "SFT 训练依赖不可用，请运行: pip install 'qwen3-rerank-trainer[full]'；"
             f"原始错误: {exc}"
         )
         return 1

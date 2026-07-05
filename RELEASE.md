@@ -47,6 +47,12 @@ Suggested versioning policy:
 
 ## Build
 
+Install release tooling if needed:
+
+```bash
+python -m pip install ".[dev]"
+```
+
 Clean old artifacts and rebuild:
 
 ```bash

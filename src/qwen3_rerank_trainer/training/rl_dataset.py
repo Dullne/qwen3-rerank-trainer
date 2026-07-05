@@ -11,7 +11,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from torch.utils.data import Dataset, IterableDataset, get_worker_info
 
-from .dataset import load_data, _clean_text_list, _iter_data_for_worker
+from .dataset import load_data, _clean_text_list, _iter_data_for_worker, _validate_sampling_config
 from ..data.formatting import PREFIX, SUFFIX, format_input
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,7 @@ class RLRerankDataset(Dataset):
         format_fn: Optional[callable] = None,
         filter_overlength: bool = False,
     ):
+        _validate_sampling_config(n_docs, n_pos, min_pos, min_neg)
         self.n_docs = n_docs
         self.n_pos = n_pos
         self.min_pos = min_pos
@@ -361,6 +362,7 @@ class StreamingRLRerankDataset(IterableDataset):
         format_fn: Optional[callable] = None,
         filter_overlength: bool = False,
     ):
+        _validate_sampling_config(n_docs, n_pos, min_pos, min_neg)
         self.data_file = data_file
         self.n_docs = n_docs
         self.n_pos = n_pos

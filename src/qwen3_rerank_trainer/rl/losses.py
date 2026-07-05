@@ -98,21 +98,16 @@ def reinforce_loss(
     ).detach()
 
     logit_diff = yes_logits - no_logits
-    log_probs = torch.where(
-        labels == 1,
-        F.logsigmoid(logit_diff),
-        F.logsigmoid(-logit_diff),
-    )
+    # The policy action is the rerank score P(yes) for every document.
+    # Labels shape rewards/advantages; switching negatives to log P(no)
+    # would make negative advantages increase their yes scores.
+    log_probs = F.logsigmoid(logit_diff)
 
     losses = -advantages * log_probs
 
     if clip_range > 0 and ref_yes_logits is not None and ref_no_logits is not None:
         ref_logit_diff = ref_yes_logits - ref_no_logits
-        ref_log_probs = torch.where(
-            labels == 1,
-            F.logsigmoid(ref_logit_diff),
-            F.logsigmoid(-ref_logit_diff),
-        )
+        ref_log_probs = F.logsigmoid(ref_logit_diff)
         log_ratio = log_probs - ref_log_probs
         ratio = torch.exp(log_ratio)
 
@@ -140,16 +135,8 @@ def reinforce_loss(
         logit_diff = yes_logits - no_logits
         ref_logit_diff = ref_yes_logits - ref_no_logits
 
-        log_prob_policy = torch.where(
-            labels == 1,
-            F.logsigmoid(logit_diff),
-            F.logsigmoid(-logit_diff),
-        )
-        log_prob_ref = torch.where(
-            labels == 1,
-            F.logsigmoid(ref_logit_diff),
-            F.logsigmoid(-ref_logit_diff),
-        )
+        log_prob_policy = F.logsigmoid(logit_diff)
+        log_prob_ref = F.logsigmoid(ref_logit_diff)
 
         log_ratio = log_prob_ref - log_prob_policy
         ratio = torch.exp(log_ratio)

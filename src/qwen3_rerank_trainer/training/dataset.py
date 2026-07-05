@@ -151,6 +151,20 @@ def _clean_text_list(values) -> List[str]:
     return cleaned
 
 
+def _validate_sampling_config(n_docs: int, n_pos: int, min_pos: int, min_neg: int) -> None:
+    """Validate positive/negative sampling arguments."""
+    if n_docs < 0:
+        raise ValueError("n_docs must be >= 0")
+    if n_pos < 0:
+        raise ValueError("n_pos must be >= 0")
+    if min_pos < 0 or min_neg < 0:
+        raise ValueError("min_pos and min_neg must be >= 0")
+    if n_docs == 0 and n_pos > 0:
+        raise ValueError("n_pos must be 0 when n_docs=0")
+    if n_docs > 0 and n_pos > 0 and n_pos >= n_docs:
+        raise ValueError("n_pos must be smaller than n_docs when fixed positive sampling is used")
+
+
 def load_data(data_path: str) -> List[Dict]:
     """加载本地数据文件，支持多种格式。
 
@@ -318,6 +332,7 @@ class RerankDataset(Dataset):
         format_fn: Optional[callable] = None,
         filter_overlength: bool = False,
     ):
+        _validate_sampling_config(n_docs, n_pos, min_pos, min_neg)
         self.n_docs = n_docs
         self.n_pos = n_pos
         self.min_pos = min_pos
@@ -517,6 +532,7 @@ class StreamingRerankDataset(IterableDataset):
         format_fn: Optional[callable] = None,
         filter_overlength: bool = False,
     ):
+        _validate_sampling_config(n_docs, n_pos, min_pos, min_neg)
         self.data_file = data_file
         self.n_docs = n_docs
         self.n_pos = n_pos

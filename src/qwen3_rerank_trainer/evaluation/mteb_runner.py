@@ -315,6 +315,17 @@ class MTEBRerankEvaluator:
             raise ValueError("No rerank function available")
         return self._normalize_rerank_output(result, documents)
 
+    @staticmethod
+    def _extract_text(item: Any, keys: Tuple[str, ...]) -> str:
+        """Extract text from common MTEB/HF row shapes."""
+        if not isinstance(item, dict):
+            return "" if item is None else str(item)
+        for key in keys:
+            value = item.get(key)
+            if value:
+                return str(value)
+        return ""
+
     def _normalize_rerank_output(
         self,
         result: Any,
@@ -332,6 +343,17 @@ class MTEBRerankEvaluator:
                 return indices.pop(0)
             return None
 
+        def complete_ranking(ranking: List[int]) -> List[int]:
+            seen: Set[int] = set()
+            unique = []
+            for idx in ranking:
+                if idx in seen:
+                    continue
+                seen.add(idx)
+                unique.append(idx)
+            unique.extend(idx for idx in range(num_docs) if idx not in seen)
+            return unique
+
         if (
             isinstance(result, tuple)
             and len(result) == 2
@@ -345,9 +367,7 @@ class MTEBRerankEvaluator:
             normalized_scores = {int(i): float(v) for i, v in scores.items() if 0 <= int(i) < num_docs}
             for idx in range(num_docs):
                 normalized_scores.setdefault(idx, 0.0)
-            full_ranking = [idx for idx in ranking if idx in normalized_scores]
-            full_ranking.extend(idx for idx in range(num_docs) if idx not in full_ranking)
-            return full_ranking, normalized_scores
+            return complete_ranking([idx for idx in ranking if idx in normalized_scores]), normalized_scores
 
         if isinstance(result, list):
             if all(isinstance(item, dict) for item in result):
@@ -364,10 +384,9 @@ class MTEBRerankEvaluator:
                         score = item.get("relevance_score", item.get("score", float(num_docs - rank)))
                         scores[idx] = float(score)
                         ranking.append(idx)
-                ranking.extend(idx for idx in range(num_docs) if idx not in ranking)
                 for idx in range(num_docs):
                     scores.setdefault(idx, 0.0)
-                return ranking, scores
+                return complete_ranking(ranking), scores
 
             if all(isinstance(item, tuple) and len(item) == 2 for item in result):
                 scores = {}
@@ -377,10 +396,9 @@ class MTEBRerankEvaluator:
                     if idx is not None and 0 <= idx < num_docs:
                         ranking.append(idx)
                         scores[idx] = float(score)
-                ranking.extend(idx for idx in range(num_docs) if idx not in ranking)
                 for idx in range(num_docs):
                     scores.setdefault(idx, 0.0)
-                return ranking, scores
+                return complete_ranking(ranking), scores
 
             if all(isinstance(item, int) for item in result):
                 if any(item < 0 or item >= num_docs for item in result):
@@ -388,9 +406,7 @@ class MTEBRerankEvaluator:
                 scores = {idx: float(num_docs - rank) for rank, idx in enumerate(result)}
                 for idx in range(num_docs):
                     scores.setdefault(idx, 0.0)
-                full_ranking = list(result)
-                full_ranking.extend(idx for idx in range(num_docs) if idx not in full_ranking)
-                return full_ranking, scores
+                return complete_ranking(list(result)), scores
 
             if all(isinstance(item, str) for item in result):
                 ranking = []
@@ -400,10 +416,9 @@ class MTEBRerankEvaluator:
                     if idx is not None:
                         ranking.append(idx)
                         scores[idx] = float(num_docs - rank)
-                ranking.extend(idx for idx in range(num_docs) if idx not in ranking)
                 for idx in range(num_docs):
                     scores.setdefault(idx, 0.0)
-                return ranking, scores
+                return complete_ranking(ranking), scores
 
         raise ValueError(
             "Unsupported rerank return format. Expected (ranking, scores), ranked documents, "
@@ -810,7 +825,7 @@ class MTEBRerankEvaluator:
             # 获取查询文本
             if isinstance(queries, dict):
                 query_item = queries.get(qid, {})
-                query_text = query_item.get('text', '') if isinstance(query_item, dict) else str(query_item)
+                query_text = self._extract_text(query_item, ("text", "query", "question", "title"))
             else:
                 query_text = str(queries[qid])
 
@@ -831,7 +846,7 @@ class MTEBRerankEvaluator:
                 if isinstance(corpus, dict) and doc_id in corpus:
                     doc = corpus[doc_id]
                     if isinstance(doc, dict):
-                        doc_text = doc.get('text', '') or doc.get('title', '')
+                        doc_text = self._extract_text(doc, ("text", "contents", "content", "title"))
                     else:
                         doc_text = str(doc)
 

@@ -38,7 +38,7 @@ class Qwen3Reranker(BaseReranker):
         if not HAS_TRANSFORMERS:
             raise ImportError(
                 "transformers is required for Qwen3Reranker. "
-                "Install with: pip install rerank-core[inference]"
+                "Install with: pip install 'qwen3-rerank-trainer[inference]'"
             )
 
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')

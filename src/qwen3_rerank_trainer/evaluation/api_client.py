@@ -32,6 +32,7 @@
 import asyncio
 import logging
 import random
+import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,9 @@ async def call_rerank_async(
             resp.raise_for_status()
             data = await resp.json()
             return _extract_rerank_results(data, len(documents))
+    except (asyncio.TimeoutError, aiohttp.ClientResponseError,
+            aiohttp.ClientConnectionError, aiohttp.ServerTimeoutError):
+        raise
     except Exception as e:
         raise RuntimeError(f"Rerank API call failed: {e}") from e
     finally:
@@ -307,6 +311,30 @@ async def call_rerank_batch_async(
 # 同步包装器
 # ============================================================================
 
+def _run_coro_sync(coro):
+    """Run a coroutine from sync code, including inside notebooks/event loops."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result = []
+    error = []
+
+    def runner():
+        try:
+            result.append(asyncio.run(coro))
+        except BaseException as exc:
+            error.append(exc)
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    thread.join()
+    if error:
+        raise error[0]
+    return result[0]
+
+
 def call_rerank(
     query: str,
     documents: List[str],
@@ -327,13 +355,7 @@ def call_rerank(
     Returns:
         (ranking, scores)
     """
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(
-            call_rerank_async(query, documents, endpoint, model, timeout)
-        )
-    finally:
-        loop.close()
+    return _run_coro_sync(call_rerank_async(query, documents, endpoint, model, timeout))
 
 
 def call_rerank_batch(
@@ -354,17 +376,13 @@ def call_rerank_batch(
 
     内部使用异步实现，对外提供同步接口。
     """
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(
-            call_rerank_batch_async(
-                items, endpoint, model, timeout,
-                max_concurrency, show_progress, progress_desc,
-                retries, backoff, backoff_factor, jitter
-            )
+    return _run_coro_sync(
+        call_rerank_batch_async(
+            items, endpoint, model, timeout,
+            max_concurrency, show_progress, progress_desc,
+            retries, backoff, backoff_factor, jitter
         )
-    finally:
-        loop.close()
+    )
 
 
 # ============================================================================

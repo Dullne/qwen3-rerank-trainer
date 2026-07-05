@@ -203,7 +203,7 @@ def main():
         from .rl_trainer import RLTrainer, load_sft_model
     except Exception as exc:
         logger.error(
-            "RL 训练依赖不可用，请运行: pip install -e '.[full]'；"
+            "RL 训练依赖不可用，请运行: pip install 'qwen3-rerank-trainer[full]'；"
             f"原始错误: {exc}"
         )
         return 1

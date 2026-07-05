@@ -1,5 +1,6 @@
 """Tests for evaluation metrics."""
 
+import asyncio
 import json
 
 import numpy as np
@@ -205,6 +206,46 @@ class TestComputeAllMetrics:
         assert ranking == [1, 0, 2]
         assert set(scores) == {0, 1, 2}
 
+    def test_mteb_deduplicates_index_ranking(self):
+        """Duplicate reranker indices should not inflate ranking metrics."""
+        from qwen3_rerank_trainer.evaluation import MTEBRerankEvaluator, ap
+
+        evaluator = MTEBRerankEvaluator(rerank_fn=lambda query, documents: ([0, 0], {0: 1.0}))
+        ranking, scores = evaluator._call_rerank("q", ["alpha", "beta", "gamma"])
+
+        assert ranking == [0, 1, 2]
+        assert ap(ranking, {0}) == 1.0
+
+    def test_mteb_v2_uses_query_field_when_text_missing(self):
+        """MTEB v2 query rows may use query/question instead of text."""
+        from qwen3_rerank_trainer.evaluation import MTEBRerankEvaluator
+
+        seen_queries = []
+
+        def fake_rerank(query, documents):
+            seen_queries.append(query)
+            return list(range(len(documents)))
+
+        evaluator = MTEBRerankEvaluator(rerank_fn=fake_rerank)
+        metrics = evaluator._evaluate_ranking_dataset(
+            queries={"q1": {"query": "query in query field"}},
+            corpus={
+                "p1": {"text": "positive"},
+                "n1": {"text": "negative one"},
+                "n2": {"text": "negative two"},
+            },
+            qrels={"q1": {"p1": 1}},
+            top_ranked={},
+            max_samples=None,
+            shuffle_seed=42,
+            ks=[1],
+            progress_callback=None,
+            show_progress=False,
+        )
+
+        assert metrics["num_evaluated"] == 1
+        assert seen_queries == ["query in query field"]
+
     def test_mteb_v2_fallback_without_top_ranked_includes_negatives(self):
         """When top_ranked is absent, candidates should include corpus negatives."""
         from qwen3_rerank_trainer.evaluation import MTEBRerankEvaluator
@@ -319,3 +360,45 @@ class TestComputeAllMetrics:
         model = evaluator._prepare_rerank_model()
         assert isinstance(model, APIRerankModel)
         assert model.endpoint == "http://localhost:9997/v1/rerank"
+
+    def test_api_safe_retry_keeps_timeout_retryable(self):
+        """Timeouts raised by call_rerank_async should be retried, not wrapped away."""
+        from qwen3_rerank_trainer.evaluation import api_client
+
+        class TimeoutSession:
+            def __init__(self):
+                self.calls = 0
+
+            def post(self, *args, **kwargs):
+                self.calls += 1
+                raise asyncio.TimeoutError()
+
+        session = TimeoutSession()
+        result = asyncio.run(
+            api_client.call_rerank_async_safe(
+                "q",
+                ["doc"],
+                endpoint="http://127.0.0.1:9/rerank",
+                session=session,
+                retries=2,
+                backoff=0,
+                jitter=0,
+            )
+        )
+
+        assert result == ([], {})
+        assert session.calls == 3
+
+    def test_sync_api_wrapper_can_run_inside_existing_event_loop(self, monkeypatch):
+        """Notebook/service users should get a result instead of nested-loop errors."""
+        from qwen3_rerank_trainer.evaluation import api_client
+
+        async def fake_call(query, documents, endpoint, model="Qwen3-Reranker-4B", timeout=30):
+            return [0], {0: 1.0}
+
+        monkeypatch.setattr(api_client, "call_rerank_async", fake_call)
+
+        async def runner():
+            return api_client.call_rerank("q", ["doc"], "http://127.0.0.1:9/rerank")
+
+        assert asyncio.run(runner()) == ([0], {0: 1.0})

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Corrected REINFORCE policy-gradient direction so negative advantages lower document
+  yes scores instead of increasing them.
+- Added validation for fixed positive sampling where `n_pos` must be smaller than `n_docs`.
+- Preserved retryable API errors for async rerank retries and made sync API wrappers usable
+  from notebooks or services with an existing event loop.
+- Hardened MTEB rerank normalization against duplicate document indices and accepted
+  `query`/`question` query fields in MTEB v2-style rows.
+- Updated install hints and release tooling prerequisites.
+
 ## [0.2.1] - 2026-07-05
 
 ### Fixed

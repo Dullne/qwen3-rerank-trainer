@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import torch
+import pytest
 
 from qwen3_rerank_trainer.training import (
     RerankDataset,
@@ -194,6 +195,28 @@ def test_rl_dataset_and_collator(tmp_path: Path):
     assert out["group_sizes"] == [3]
     assert tokenizer.padding_side == "right"
     assert "left" in tokenizer.seen_padding_sides
+
+
+def test_dataset_rejects_fixed_positive_count_not_smaller_than_group_size(tmp_path: Path):
+    data_file = tmp_path / "train.jsonl"
+    _write_jsonl(
+        data_file,
+        [
+            {"query": "q1", "positives": ["p1", "p2", "p3"], "negatives": ["n1", "n2"]},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="n_pos must be smaller than n_docs"):
+        RerankDataset(str(data_file), n_docs=2, n_pos=3)
+
+    with pytest.raises(ValueError, match="n_pos must be smaller than n_docs"):
+        RLRerankDataset(str(data_file), n_docs=2, n_pos=3)
+
+    with pytest.raises(ValueError, match="n_pos must be 0 when n_docs=0"):
+        StreamingRerankDataset(str(data_file), n_docs=0, n_pos=1)
+
+    with pytest.raises(ValueError, match="n_pos must be 0 when n_docs=0"):
+        StreamingRLRerankDataset(str(data_file), n_docs=0, n_pos=1)
 
 
 def test_streaming_datasets(tmp_path: Path):

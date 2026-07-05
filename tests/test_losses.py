@@ -231,6 +231,28 @@ class TestRLLoss:
         assert yes_logits.grad is not None
         assert no_logits.grad is not None
 
+    def test_reinforce_negative_advantage_lowers_yes_score(self):
+        """A penalized negative document should get a positive yes-logit gradient."""
+        from qwen3_rerank_trainer.rl import reinforce_loss
+
+        yes_logits = torch.tensor([0.0, 0.0], requires_grad=True)
+        no_logits = torch.tensor([0.0, 0.0], requires_grad=True)
+        labels = torch.tensor([1, 0])
+
+        loss, advantages, rewards, kl = reinforce_loss(
+            yes_logits,
+            no_logits,
+            labels,
+            reward_type="score_based",
+            scale_rewards=False,
+            kl_coef=0.0,
+        )
+        loss.backward()
+
+        assert advantages.tolist() == [0.5, -0.5]
+        assert yes_logits.grad[0] < 0
+        assert yes_logits.grad[1] > 0
+
     def test_reinforce_rejects_non_1d_labels(self):
         """REINFORCE loss should fail fast on accidental matrix labels."""
         from qwen3_rerank_trainer.rl import reinforce_loss
